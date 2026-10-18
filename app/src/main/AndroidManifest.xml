@@ -1,0 +1,215 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Bluetooth -->
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+
+    <!-- WiFi -->
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+
+    <!-- Location (required for WiFi scan + BLE on older APIs) -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+
+    <!-- NFC -->
+    <uses-permission android:name="android.permission.NFC" />
+
+    <!-- IR -->
+    <uses-permission android:name="android.permission.TRANSMIT_IR" />
+
+    <!-- UWB ranging -->
+    <uses-permission android:name="android.permission.UWB_RANGING" />
+
+    <!-- Camera -->
+    <uses-permission android:name="android.permission.CAMERA" />
+
+    <!-- Phone state (cell tower info) -->
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+
+    <!-- Audio (ultrasonic analyzer) -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
+    <!-- Wi-Fi Direct -->
+    <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES" />
+
+    <!-- Foreground service (wardriving) -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+    <!-- All hardware features optional -->
+    <uses-feature android:name="android.hardware.bluetooth_le" android:required="false" />
+    <uses-feature android:name="android.hardware.bluetooth" android:required="false" />
+    <uses-feature android:name="android.hardware.wifi" android:required="false" />
+    <uses-feature android:name="android.hardware.nfc" android:required="false" />
+    <uses-feature android:name="android.hardware.sensor.accelerometer" android:required="false" />
+    <uses-feature android:name="android.hardware.sensor.gyroscope" android:required="false" />
+    <uses-feature android:name="android.hardware.sensor.barometer" android:required="false" />
+    <uses-feature android:name="android.hardware.sensor.compass" android:required="false" />
+    <uses-feature android:name="android.hardware.sensor.light" android:required="false" />
+    <uses-feature android:name="android.hardware.sensor.proximity" android:required="false" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
+    <uses-feature android:name="android.hardware.consumerir" android:required="false" />
+    <uses-feature android:name="android.hardware.usb.host" android:required="false" />
+    <uses-feature android:name="android.hardware.uwb" android:required="false" />
+    <uses-feature android:name="android.hardware.wifi.aware" android:required="false" />
+    <uses-feature android:name="android.hardware.location" android:required="false" />
+    <uses-feature android:name="android.hardware.telephony" android:required="false" />
+    <uses-feature android:name="android.hardware.microphone" android:required="false" />
+    <uses-feature android:name="android.hardware.wifi.direct" android:required="false" />
+    <uses-feature android:name="android.hardware.location.gps" android:required="false" />
+    <uses-feature android:name="android.hardware.nfc.hce" android:required="false" />
+
+    <application
+        android:name=".RadiusRfApp"
+        android:allowBackup="true"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="@xml/backup_rules"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.RadiusRf">
+        <service
+            android:name=".features.wardriving.service.WardrivingScanService"
+            android:foregroundServiceType="location|connectedDevice"
+            android:exported="false" />
+
+        <service
+            android:name=".core.lifecycle.ScanKeepAliveService"
+            android:foregroundServiceType="location|connectedDevice|microphone"
+            android:exported="false" />
+
+        <!-- Watch rules: short spaced-out scans while the user is away from the app. -->
+        <service
+            android:name=".features.watch.service.WatchService"
+            android:foregroundServiceType="location|connectedDevice"
+            android:exported="false" />
+
+        <receiver
+            android:name=".core.notify.NotificationActionReceiver"
+            android:exported="false" />
+
+        <!-- Quick Settings tiles -->
+        <service
+            android:name=".features.surfaces.SweepTile"
+            android:exported="true"
+            android:icon="@drawable/ic_tile_sweep"
+            android:label="@string/tile_sweep"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:name=".features.surfaces.TrackerCheckTile"
+            android:exported="true"
+            android:icon="@drawable/ic_tile_tracker"
+            android:label="@string/tile_tracker"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:name=".features.surfaces.WatchTile"
+            android:exported="true"
+            android:icon="@drawable/ic_tile_watch"
+            android:label="@string/tile_watch"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.service.quicksettings.TOGGLEABLE_TILE"
+                android:value="true" />
+        </service>
+
+        <service
+            android:name=".features.surfaces.NfcTile"
+            android:exported="true"
+            android:icon="@drawable/ic_tile_nfc"
+            android:label="@string/tile_nfc"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <!-- Home-screen widgets -->
+        <receiver
+            android:name=".features.surfaces.StatusWidgetReceiver"
+            android:exported="true"
+            android:label="@string/widget_status_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_status" />
+        </receiver>
+
+        <receiver
+            android:name=".features.surfaces.TrackerWidgetReceiver"
+            android:exported="true"
+            android:label="@string/widget_tracker_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_tracker" />
+        </receiver>
+
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
+        <service
+            android:name=".features.nfc.service.RadiusRfHceService"
+            android:exported="true"
+            android:permission="android.permission.BIND_NFC_SERVICE">
+            <intent-filter>
+                <action android:name="android.nfc.cardemulation.action.HOST_APDU_SERVICE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.nfc.cardemulation.host_apdu_service"
+                android:resource="@xml/hce_service" />
+        </service>
+
+        <!-- singleTask: relaunching from the launcher, a notification or an NFC tag reuses the
+             running instance (delivered via onNewIntent) instead of stacking a second copy of
+             the whole app on top of a screen that is still scanning. -->
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:theme="@style/Theme.RadiusRf.Splash">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <!-- Long-pressing one of our Quick Settings tiles opens its screen. -->
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE_PREFERENCES" />
+            </intent-filter>
+        </activity>
+    </application>
+
+</manifest>

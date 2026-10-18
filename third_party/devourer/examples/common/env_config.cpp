@@ -1,0 +1,313 @@
+#include "env_config.h"
+
+#include <cctype>
+#include <cstdint>
+#include <cstdlib>
+#include <cstring>
+
+#include "RadiotapBuilder.h"
+
+namespace {
+
+/* Flag semantics: set and not "0". (The library's historical readers were a
+ * mix of presence-checks and =='1' checks; no script sets a flag to 0, so this
+ * covers both.) */
+bool env_flag(const char *name) {
+  const char *e = std::getenv(name);
+  return e != nullptr && std::strcmp(e, "0") != 0;
+}
+
+const char *env_str(const char *name) { return std::getenv(name); }
+
+/* Case-insensitive ASCII string equality (strcasecmp is POSIX-only). */
+bool str_ieq(const char *a, const char *b) {
+  for (; *a && *b; ++a, ++b)
+    if (std::tolower(static_cast<unsigned char>(*a)) !=
+        std::tolower(static_cast<unsigned char>(*b)))
+      return false;
+  return *a == *b;
+}
+
+/* strtol with base auto-detect (0x-hex or decimal), matching the parse the
+ * library's readers used per knob. */
+bool env_long(const char *name, long *out) {
+  const char *e = std::getenv(name);
+  if (!e || !*e)
+    return false;
+  *out = std::strtol(e, nullptr, 0);
+  return true;
+}
+
+/* DEVOURER_RX_MODE spelling -> RxMode (UsbTransport RX-ring strategy). Accepts
+ * hyphen or underscore; unrecognised falls back to the default async ring. */
+devourer::RxMode parse_rx_mode(const char *s) {
+  if (str_ieq(s, "sync"))
+    return devourer::RxMode::Sync;
+  if (str_ieq(s, "reorder-pool") || str_ieq(s, "reorder_pool") ||
+      str_ieq(s, "pool"))
+    return devourer::RxMode::ReorderPool;
+  if (str_ieq(s, "spsc-fat") || str_ieq(s, "spsc_fat") || str_ieq(s, "spsc"))
+    return devourer::RxMode::SpscFat;
+  if (str_ieq(s, "decoupled"))
+    return devourer::RxMode::Decoupled;
+  return devourer::RxMode::Async;
+}
+
+} // namespace
+
+devourer::DeviceConfig devourer_config_from_env() {
+  devourer::DeviceConfig cfg;
+  long v = 0;
+
+  /* ---- rx ---- */
+  cfg.rx.keep_corrupted = env_flag("DEVOURER_RX_KEEP_CORRUPTED");
+  cfg.rx.enable_with_tx = env_str("DEVOURER_TX_WITH_RX") != nullptr;
+  if (const char *e = env_str("DEVOURER_RX_CSI_MASK"))
+    cfg.rx.csi_mask = e;
+  if (const char *e = env_str("DEVOURER_RX_NBI"))
+    cfg.rx.nbi = e;
+  if (const char *e = env_str("DEVOURER_RX_PATHS"))
+    cfg.rx.path_spec = e;
+  if (env_long("DEVOURER_RX_URBS", &v))
+    cfg.rx.urbs = static_cast<int>(v);
+  if (env_long("DEVOURER_RX_URB_BYTES", &v))
+    cfg.rx.urb_bytes = static_cast<int>(v);
+  if (const char *e = env_str("DEVOURER_RX_MODE"))
+    cfg.rx.rx_mode = parse_rx_mode(e);
+  if (env_long("DEVOURER_RX_POOL_SPARE", &v))
+    cfg.rx.pool_spare = static_cast<int>(v);
+  if (const char *e = env_str("DEVOURER_RX_POOL_EXHAUST")) {
+    if (str_ieq(e, "drop"))
+      cfg.rx.pool_exhaust = devourer::PoolExhaust::Drop;
+    else if (str_ieq(e, "backpressure") || str_ieq(e, "bp"))
+      cfg.rx.pool_exhaust = devourer::PoolExhaust::Backpressure;
+  }
+  if (env_long("DEVOURER_RX_RING_MS", &v))
+    cfg.rx.ring_ms = static_cast<int>(v);
+  cfg.rx.phy_status_8821c = !env_flag("DEVOURER_8821C_NO_PHYST");
+  cfg.rx.abs_noise_floor = env_flag("DEVOURER_RX_NOISE_FLOOR");
+  if (env_long("DEVOURER_IGI", &v))
+    cfg.rx.igi = static_cast<uint8_t>(v & 0x7f);
+  if (const char *e = env_str("DEVOURER_ACK_RESPONDER"))
+    cfg.rx.ack_responder = devourer::parse_mac(e);
+
+  /* ---- tx ---- */
+  if (env_long("DEVOURER_TX_EP", &v))
+    cfg.tx.ep = static_cast<uint8_t>(v);
+  if (env_long("DEVOURER_TX_TIMEOUT_MS", &v))
+    cfg.tx.timeout_ms = static_cast<unsigned>(v);
+  cfg.tx.legacy_8812_desc = env_flag("DEVOURER_TX_LEGACY_8812_DESC");
+  if (env_long("DEVOURER_TX_PWR", &v))
+    cfg.tx.power_index = static_cast<int>(v & 0x3f);
+  if (env_long("DEVOURER_TX_RF_BW", &v))
+    cfg.tx.rf_bw = static_cast<uint8_t>(v & 0x3);
+  cfg.tx.cw_tone = env_flag("DEVOURER_CW_TONE");
+  if (env_long("DEVOURER_CW_TONE_GAIN", &v))
+    cfg.tx.cw_tone_gain = static_cast<uint8_t>(v) & 0x1F;
+  if (env_long("DEVOURER_TX_USB_AGG", &v) && v > 0)
+    cfg.tx.usb_agg_max = static_cast<unsigned>(v);
+  if (env_long("DEVOURER_TX_REPORT", &v)) /* sampling divisor N, 0..255 */
+    cfg.tx.report = static_cast<int>(v < 0 ? 0 : v > 255 ? 255 : v);
+  if (const char *e = env_str("DEVOURER_TX_AMPDU_MODE")) {
+    devourer::AmpduMode m;
+    if (devourer::parse_ampdu_mode(e, m)) {
+      cfg.tx.ampdu = m;
+    } else {
+      /* A silently-ignored spec means a bench that thinks it measured
+       * aggregation and didn't — fail loudly like RETRY_FALLBACK below. */
+      std::fprintf(stderr,
+                   "devourer [W] DEVOURER_TX_AMPDU_MODE='%s' unparsable — "
+                   "A-MPDU stays off\n", e);
+      std::fflush(stderr);
+    }
+  }
+  if (env_long("DEVOURER_ACK_TIMEOUT_US", &v) && v >= 1)
+    /* 1..255; out-of-range low keeps the library default (a 0 collapsing
+     * to 1 us would write off every frame). */
+    cfg.tx.ack_timeout_us = static_cast<int>(v > 255 ? 255 : v);
+  if (env_long("DEVOURER_TX_RETRY_LIMIT", &v))
+    cfg.tx.retry_limit = static_cast<int>(v < 0 ? 0 : (v > 63 ? 63 : v));
+  if (const char *e = env_str("DEVOURER_TX_RETRY_FALLBACK")) {
+    if (str_ieq(e, "off")) {
+      cfg.tx.retry_fallback = devourer::RetryFallback::Off;
+    } else {
+      /* A floor form was measured and rejected — the fw reinterprets
+       * DATA_RTY_LOWEST_RATE inside the RA-group rate space (see the
+       * RetryFallback enum note in DeviceConfig.h). */
+      std::fprintf(stderr,
+                   "devourer [W] DEVOURER_TX_RETRY_FALLBACK='%s' unsupported "
+                   "(only \"off\") — keeping the firmware ladder\n", e);
+      std::fflush(stderr); /* the diagnostic plane is per-line flushed */
+    }
+  }
+
+  /* ---- bf ---- */
+  if (const char *snd = env_str("DEVOURER_BF_ARM_SOUNDER")) {
+    cfg.bf.arm_sounder = true;
+    /* "aa:bb:..:ff" also programs the self-MAC; a bare "1" arms only. */
+    cfg.bf.sounder_self_mac = devourer::parse_mac(snd);
+  }
+  if (const char *e = env_str("DEVOURER_BF_ARM_BFEE"))
+    cfg.bf.beamformee_of = devourer::parse_mac(e);
+  cfg.bf.mu = env_flag("DEVOURER_BF_ARM_BFEE_MU");
+  if (const char *e = env_str("DEVOURER_BF_TXBF"))
+    cfg.bf.txbf_peer = devourer::parse_mac(e);
+  if (const char *e = env_str("DEVOURER_TX_NDPA")) {
+    int p = std::atoi(e);
+    cfg.bf.ndpa_period = p > 0 ? p : 1;
+  }
+
+  /* ---- MediaTek MT7612U ---- */
+  /* Folded in here rather than read inside the backend, so neither the C
+   * library nor the device class consults ambient process state. */
+  if (const char *e = env_str("DEVOURER_MT7612U_FW_DIR"))
+    cfg.mt7612u.firmware_dir = std::string(e);
+
+  /* ---- tuning ---- */
+  /* Defaults ON, so this reads the negation: only an explicit 0 disables it. */
+  if (const char *e = env_str("DEVOURER_TEARDOWN_POWER_DOWN"))
+    cfg.tuning.teardown_power_down = (std::atoi(e) != 0);
+  cfg.tuning.skip_iqk = env_flag("DEVOURER_SKIP_IQK");
+  cfg.tuning.force_iqk = env_flag("DEVOURER_FORCE_IQK");
+  cfg.tuning.disable_iqk = env_flag("DEVOURER_DISABLE_IQK");
+  cfg.tuning.skip_txpwr = env_flag("DEVOURER_SKIP_TXPWR");
+  cfg.tuning.skip_txgapk = env_flag("DEVOURER_SKIP_TXGAPK");
+  cfg.tuning.skip_trx_reassert = env_flag("DEVOURER_SKIP_TRX_REASSERT");
+  cfg.tuning.skip_rfe_init = env_flag("DEVOURER_SKIP_RFEINIT");
+  cfg.tuning.skip_coex = env_flag("DEVOURER_SKIP_COEX");
+  cfg.tuning.skip_dig = env_flag("DEVOURER_SKIP_DIG");
+  /* Default-on knob: unset = tracking on; only "0" disables it. */
+  if (const char *e = env_str("DEVOURER_THERMAL_TRACK"))
+    cfg.tuning.thermal_track = std::strcmp(e, "0") != 0;
+  cfg.tuning.disable_cca = env_flag("DEVOURER_DIS_CCA");
+  if (env_long("DEVOURER_FASTRETUNE_FW", &v) && v >= 0)
+    cfg.tuning.fastretune_fw = static_cast<int>(v);
+  if (env_long("DEVOURER_KFR_OFLD", &v) && v >= 0)
+    cfg.tuning.kestrel_fastretune_ofld = static_cast<int>(v);
+  if (env_long("DEVOURER_FW_TABLE_OFLD", &v) && v >= 0)
+    cfg.tuning.fw_table_offload = static_cast<int>(v);
+  /* Jaguar3 per-packet power-bank step size (qdB per 0x1e70 offset-index
+   * step; default 4 = 1 dB) — bench slope-calibration override. */
+  if (env_long("DEVOURER_TXPKT_STEP_QDB", &v) && v > 0)
+    cfg.tuning.txpkt_step_qdb = static_cast<int>(v);
+  if (env_long("DEVOURER_RFE", &v))
+    cfg.tuning.rfe_type = static_cast<uint8_t>(v);
+  /* Raw codes — each backend masks to its own field width (J2/J3 3-bit,
+   * RTL8733B 4-bit ADC at 0x9f0[3:0], whose default codes 0xa/0xb a 0x7
+   * mask would silently corrupt). */
+  if (env_long("DEVOURER_NB_DAC", &v))
+    cfg.tuning.nb_dac = static_cast<uint8_t>(v & 0xf);
+  if (env_long("DEVOURER_NB_ADC", &v))
+    cfg.tuning.nb_adc = static_cast<uint8_t>(v & 0xf);
+  if (env_long("DEVOURER_XTAL_CAP", &v))
+    cfg.tuning.xtal_cap = static_cast<uint8_t>(v & 0x7f);
+  cfg.tuning.cfo_track = env_flag("DEVOURER_CFO_TRACK");
+  if (const char *e = env_str("DEVOURER_REGULATION")) {
+    if (str_ieq(e, "ETSI"))
+      cfg.tuning.regulation = devourer::Regulation::ETSI;
+    else if (str_ieq(e, "MKK"))
+      cfg.tuning.regulation = devourer::Regulation::MKK;
+    else if (str_ieq(e, "WW"))
+      cfg.tuning.regulation = devourer::Regulation::WW;
+    else
+      cfg.tuning.regulation = devourer::Regulation::FCC;
+  }
+  cfg.tuning.txpwr_by_rate = env_flag("DEVOURER_ENABLE_TXPWR_BY_RATE");
+  cfg.tuning.phydm_watchdog = env_flag("DEVOURER_PHYDM_WATCHDOG");
+  if (const char *e = env_str("DEVOURER_8814_FWDL");
+      e && std::strcmp(e, "rtw88") == 0)
+    cfg.tuning.fwdl_8814 = devourer::Fwdl8814Path::Rtw88;
+  if (env_long("DEVOURER_8814_FWDL_CHUNK", &v))
+    cfg.tuning.fwdl_8814_chunk = static_cast<uint32_t>(v);
+  if (const char *e = env_str("DEVOURER_DPDT_MODE")) {
+    if (str_ieq(e, "legacy"))
+      cfg.tuning.dpdt_8822e = devourer::Dpdt8822eMode::Legacy;
+    else if (str_ieq(e, "bit24"))
+      cfg.tuning.dpdt_8822e = devourer::Dpdt8822eMode::Bit24;
+    else if (str_ieq(e, "skip"))
+      cfg.tuning.dpdt_8822e = devourer::Dpdt8822eMode::Skip;
+    else
+      cfg.tuning.dpdt_8822e = devourer::Dpdt8822eMode::EfemPinmux;
+  }
+
+  /* ---- debug ---- */
+  cfg.debug.dump_canary = env_flag("DEVOURER_DUMP_CANARY");
+  cfg.debug.bb_dump = env_flag("DEVOURER_BB_DUMP");
+  cfg.debug.efuse_dump = env_flag("DEVOURER_EFUSE_DUMP");
+  cfg.debug.log_writes = env_flag("DEVOURER_LOG_WRITES");
+  cfg.debug.log_txpwr = env_flag("DEVOURER_LOG_TXPWR");
+  cfg.debug.kestrel_fw_log = env_flag("DEVOURER_KESTREL_FWLOG");
+  cfg.debug.kestrel_cca_on = env_flag("DEVOURER_KESTREL_CCA_ON");
+  cfg.debug.kestrel_trigger_f2p = env_flag("DEVOURER_KESTREL_TRIGGER_F2P");
+  if (const char *e = env_str("DEVOURER_REPLAY_WSEQ"))
+    cfg.debug.replay_wseq = e;
+  if (env_long("DEVOURER_TX_QSEL", &v))
+    cfg.debug.tx_qsel = static_cast<uint8_t>(v & 0x1f);
+  if (env_long("DEVOURER_TX_RATEID", &v))
+    cfg.debug.tx_rateid = static_cast<uint8_t>(v & 0x1f);
+  /* "max[/density[/rty]]" — A-MPDU spike descriptor overrides. */
+  if (const char *e = env_str("DEVOURER_TX_AMPDU")) {
+    char *end = nullptr;
+    long maxn = std::strtol(e, &end, 0);
+    if (maxn > 0) {
+      cfg.debug.tx_ampdu_max = static_cast<uint8_t>(maxn & 0x1f);
+      if (end && *end == '/') {
+        cfg.debug.tx_ampdu_density =
+            static_cast<uint8_t>(std::strtol(end + 1, &end, 0) & 0x7);
+        if (end && *end == '/')
+          cfg.debug.tx_ampdu_rty =
+              static_cast<uint8_t>(std::strtol(end + 1, nullptr, 0) & 0x3f);
+      }
+    }
+  }
+  cfg.debug.hop_prof = env_flag("DEVOURER_HOP_PROF");
+  cfg.debug.gaintab_dbg = env_flag("DEVOURER_GAINTAB_DBG");
+
+  /* ---- usb ---- */
+  if (const char *e = env_str("TMPDIR"); e && *e)
+    cfg.usb.lock_dir = e;
+  if (env_str("DEVOURER_RX_ZEROCOPY")) /* default true; =0 forces the heap path */
+    cfg.usb.rx_zerocopy = env_flag("DEVOURER_RX_ZEROCOPY");
+
+  return cfg;
+}
+
+devourer::TxMode devourer_tx_mode_from_env() {
+  const char *raw = std::getenv("DEVOURER_TX_RATE");
+  return devourer::parse_tx_mode_str(raw ? raw : "");
+}
+
+void apply_logging_env(Logger &logger) {
+  if (const char *e = std::getenv("DEVOURER_LOG_LEVEL")) {
+    if (str_ieq(e, "trace"))
+      logger.set_level(Logger::Level::Trace);
+    else if (str_ieq(e, "debug"))
+      logger.set_level(Logger::Level::Debug);
+    else if (str_ieq(e, "info"))
+      logger.set_level(Logger::Level::Info);
+    else if (str_ieq(e, "warn"))
+      logger.set_level(Logger::Level::Warn);
+    else if (str_ieq(e, "error"))
+      logger.set_level(Logger::Level::Error);
+    else if (str_ieq(e, "silent"))
+      logger.set_level(Logger::Level::Silent);
+    else
+      std::fprintf(stderr, "devourer [W] DEVOURER_LOG_LEVEL='%s' unknown — "
+                           "keeping default\n", e);
+  }
+
+  const auto flush = env_flag("DEVOURER_EVENT_FLUSH") ||
+                             std::getenv("DEVOURER_EVENT_FLUSH") == nullptr
+                         ? devourer::EventSink::FlushPolicy::EveryLine
+                         : devourer::EventSink::FlushPolicy::Never;
+  if (const char *e = std::getenv("DEVOURER_EVENTS")) {
+    if (str_ieq(e, "off"))
+      logger.events().disable();
+    else if (str_ieq(e, "stderr"))
+      logger.events().configure(stderr, flush);
+    else
+      logger.events().configure(stdout, flush);
+  } else {
+    logger.events().configure(stdout, flush);
+  }
+}

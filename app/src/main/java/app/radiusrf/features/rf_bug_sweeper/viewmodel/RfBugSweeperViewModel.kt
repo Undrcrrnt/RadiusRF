@@ -1,0 +1,312 @@
+package app.radiusrf.features.rf_bug_sweeper.viewmodel
+
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import app.radiusrf.features.ble.domain.BleScanner
+import app.radiusrf.features.rf_bug_sweeper.domain.BugDetection
+import app.radiusrf.features.rf_bug_sweeper.domain.BugSweepState
+import app.radiusrf.features.rf_bug_sweeper.domain.RfBugDetector
+import app.radiusrf.features.rf_bug_sweeper.domain.SweepMode
+import app.radiusrf.features.sensors.domain.MetalDetector
+import app.radiusrf.features.sensors.domain.SensorDataCollector
+import app.radiusrf.features.ultrasonic.domain.UltrasonicAnalyzer
+import app.radiusrf.core.sessions.ItemKind
+import app.radiusrf.core.sessions.SessionItem
+import app.radiusrf.core.sessions.SessionRepository
+import app.radiusrf.features.rf_bug_sweeper.domain.ThreatSeverity
+import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.launch
+import javax.inject.Inject
+import app.radiusrf.core.debug.DemoDataBus
+import app.radiusrf.core.debug.DemoData
+import app.radiusrf.core.debug.observeDemoRequests
+
+@HiltViewModel
+class RfBugSweeperViewModel @Inject constructor(
+    private val bleScanner: BleScanner,
+    private val ultrasonicAnalyzer: UltrasonicAnalyzer,
+    private val sensorDataCollector: SensorDataCollector,
+    private val sessions: SessionRepository,
+    private val demoBus: DemoDataBus
+) : ViewModel() {
+
+    /** When the current run started; null when no run is in progress. */
+    private var runStartedAt: Long? = null
+
+
+    private val _state = MutableStateFlow(BugSweepState())
+    val state: StateFlow<BugSweepState> = _state.asStateFlow()
+
+    private val rfBugDetector = RfBugDetector()
+    private val metalDetector = MetalDetector()
+
+    // Per-source detection maps for deduplication
+    private val bleDetections = mutableMapOf<String, BugDetection>()     // keyed by BLE address
+    private var ultrasonicDetection: BugDetection? = null
+    private var magneticDetection: BugDetection? = null
+
+    private var bleJob: Job? = null
+    private var ultrasonicJob: Job? = null
+    private var magneticJob: Job? = null
+    private var timerJob: Job? = null
+    private var sweepStartMs: Long = 0L
+
+    // ── Public API ─────────────────────────────────────────────────────
+
+    fun startSweep(modes: Set<SweepMode> = setOf(SweepMode.ALL)) {
+        if (_state.value.isPaused) {
+            resumeSweep()
+            return
+        }
+        val resolvedModes = if (modes.contains(SweepMode.ALL)) {
+            setOf(SweepMode.BLE, SweepMode.ULTRASONIC, SweepMode.MAGNETIC)
+        } else {
+            modes
+        }
+
+        sweepStartMs = System.currentTimeMillis()
+        runStartedAt = System.currentTimeMillis()
+
+        _state.value = _state.value.copy(
+            isSweeping = true,
+            isPaused = false,
+            activeModes = resolvedModes,
+            error = null
+        )
+        launchModes(resolvedModes)
+    }
+
+    fun pauseSweep() {
+        if (!_state.value.isSweeping) return
+        cancelSweepJobs()
+        sensorDataCollector.stop()
+        _state.value = _state.value.copy(isSweeping = false, isPaused = true)
+    }
+
+    fun resumeSweep() {
+        val modes = _state.value.activeModes.ifEmpty {
+            setOf(SweepMode.BLE, SweepMode.ULTRASONIC, SweepMode.MAGNETIC)
+        }
+        _state.value = _state.value.copy(isSweeping = true, isPaused = false, activeModes = modes, error = null)
+        launchModes(modes)
+    }
+
+    private fun launchModes(modes: Set<SweepMode>) {
+        if (SweepMode.BLE in modes) startBleSweep()
+        if (SweepMode.ULTRASONIC in modes) startUltrasonicSweep()
+        if (SweepMode.MAGNETIC in modes) startMagneticSweep()
+        startTimer()
+    }
+
+    private fun cancelSweepJobs() {
+        bleJob?.cancel()
+        ultrasonicJob?.cancel()
+        magneticJob?.cancel()
+        timerJob?.cancel()
+        bleJob = null
+        ultrasonicJob = null
+        magneticJob = null
+        timerJob = null
+    }
+
+    fun stopSweep() {
+        runStartedAt?.let { started ->
+            runStartedAt = null
+            recordSession(started)
+        }
+        cancelSweepJobs()
+        sensorDataCollector.stop()
+        metalDetector.reset()
+
+        _state.value = _state.value.copy(
+            isSweeping = false,
+            isPaused = false,
+            activeModes = emptySet()
+        )
+    }
+
+    fun clearDetections() {
+        bleDetections.clear()
+        ultrasonicDetection = null
+        magneticDetection = null
+        metalDetector.reset()
+        _state.value = BugSweepState()
+    }
+
+    fun calibrateMagnetic() {
+        metalDetector.reset()
+        magneticDetection = null
+        rebuildDetections()
+    }
+
+    // ── BLE sweep ──────────────────────────────────────────────────────
+
+    private fun startBleSweep() {
+        bleJob?.cancel()
+        bleJob = viewModelScope.launch {
+            bleScanner.scan()
+                .catch { e ->
+                    _state.value = _state.value.copy(
+                        error = "BLE scan error: ${e.message}"
+                    )
+                }
+                .collect { devices ->
+                    // Update total BLE device count
+                    _state.value = _state.value.copy(bleDeviceCount = devices.size)
+
+                    // Run detection analysis — dedup by address
+                    bleDetections.clear()
+                    val suspicious = rfBugDetector.analyseBleDevices(devices)
+                    for (det in suspicious) {
+                        // Use the device address extracted from the detection id
+                        val key = det.id
+                        bleDetections[key] = det
+                    }
+                    rebuildDetections()
+                }
+        }
+    }
+
+    // ── Ultrasonic sweep ───────────────────────────────────────────────
+
+    private fun startUltrasonicSweep() {
+        ultrasonicJob?.cancel()
+        ultrasonicJob = viewModelScope.launch {
+            ultrasonicAnalyzer.analyze()
+                .catch { e ->
+                    _state.value = _state.value.copy(
+                        error = "Ultrasonic error: ${e.message}"
+                    )
+                }
+                .collect { uState ->
+                    if (uState.error != null) {
+                        _state.value = _state.value.copy(error = "Ultrasonic: ${uState.error}")
+                        return@collect
+                    }
+
+                    val detection = rfBugDetector.analyseUltrasonic(
+                        peakFrequencyHz = uState.peakFrequency,
+                        peakMagnitude = uState.peakMagnitude,
+                        beaconCount = uState.detectedBeacons.size
+                    )
+
+                    ultrasonicDetection = detection
+                    _state.value = _state.value.copy(
+                        ultrasonicDetected = detection != null
+                    )
+                    rebuildDetections()
+                }
+        }
+    }
+
+    // ── Magnetic sweep ─────────────────────────────────────────────────
+
+    private fun startMagneticSweep() {
+        magneticJob?.cancel()
+        sensorDataCollector.start()
+        magneticJob = viewModelScope.launch {
+            sensorDataCollector.magnetometer.collect { reading ->
+                if (!reading.isAvailable || reading.values.isEmpty()) return@collect
+
+                val metalState = metalDetector.update(reading.values)
+
+                _state.value = _state.value.copy(
+                    magneticBaseline = metalState.baseline,
+                    magneticCurrent = metalState.currentMagnitude,
+                    magneticDeviation = metalState.deviation
+                )
+
+                val detection = rfBugDetector.analyseMagnetic(
+                    baseline = metalState.baseline,
+                    current = metalState.currentMagnitude,
+                    deviation = metalState.deviation
+                )
+
+                magneticDetection = detection
+                rebuildDetections()
+            }
+        }
+    }
+
+    // ── Timer ──────────────────────────────────────────────────────────
+
+    private fun startTimer() {
+        timerJob?.cancel()
+        timerJob = viewModelScope.launch {
+            while (true) {
+                delay(1000)
+                _state.value = _state.value.copy(
+                    sweepDurationMs = System.currentTimeMillis() - sweepStartMs
+                )
+            }
+        }
+    }
+
+    // ── Rebuild combined detection list ────────────────────────────────
+
+    private fun rebuildDetections() {
+        val all = mutableListOf<BugDetection>()
+        all.addAll(bleDetections.values)
+        ultrasonicDetection?.let { all.add(it) }
+        magneticDetection?.let { all.add(it) }
+
+        // Sort: CRITICAL first, then by severity ordinal, then newest first
+        all.sortWith(
+            compareBy<BugDetection> { it.severity.ordinal }
+                .thenByDescending { it.timestamp }
+        )
+
+        _state.value = _state.value.copy(detections = all)
+    }
+
+    // ── Lifecycle ──────────────────────────────────────────────────────
+
+    private fun recordSession(startedAt: Long) {
+        val state = _state.value
+        sessions.recordInBackground(
+            tool = "rf_bug_sweeper",
+            title = "RF bug sweep",
+            startedAt = startedAt,
+            items = state.detections.map { d ->
+                SessionItem(
+                    key = "${d.type}:${d.title}",
+                    label = d.title,
+                    kind = ItemKind.RF,
+                    rssi = d.rssi,
+                    detail = d.detail,
+                    flagged = d.severity != ThreatSeverity.LOW
+                )
+            },
+            summary = "${state.bleDeviceCount} radios checked · ${state.detections.size} finding${if (state.detections.size == 1) "" else "s"}"
+        )
+    }
+
+    override fun onCleared() {
+        stopSweep()
+    }
+
+    init {
+        observeDemoRequests(demoBus, DemoData.Routes.RF_BUG_SWEEPER) { loadDemoData() }
+    }
+
+    /** Debug-only: replaces live state with [DemoData] so the populated UI can be verified without hardware. */
+    private fun loadDemoData() {
+        stopSweep()
+        _state.value = _state.value.copy(
+            detections = DemoData.bugDetections,
+            bleDeviceCount = 17,
+            ultrasonicDetected = true,
+            magneticBaseline = 48.2f,
+            magneticCurrent = 93.7f,
+            magneticDeviation = 45.5f,
+            sweepDurationMs = 64_000L,
+            error = null
+        )
+    }
+}

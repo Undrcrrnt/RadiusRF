@@ -1,0 +1,2264 @@
+#include <atomic>
+#include <cassert>
+#include <cerrno>
+#include <chrono>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <functional>
+#include <limits>
+#include <memory>
+#include <mutex>
+#include <random>
+#include <string>
+#include <thread>
+#include <vector>
+
+#include <libusb.h>
+
+#include "BfReportDetect.h"
+#include "DeviceSession.h"
+#include "HopSchedule.h"
+#include "hopset/HopsetEvents.h"
+#include "hopset/HopsetFollower.h"
+#include "hopset/HopsetPolicy.h"
+#include "hopset/HopsetWire.h"
+#include "LaCapture.h"
+#include "RadiotapBuilder.h"
+#include "LinkHealth.h"
+#include "RxPacket.h"
+#include "SweepSpec.h"
+#include "TriggerParse.h"
+#include "caps_event.h"
+#if defined(DEVOURER_HAVE_JAGUAR1)
+#include "jaguar1/RtlJaguarDevice.h"
+#endif
+#if defined(DEVOURER_HAVE_JAGUAR2)
+#include "jaguar2/RtlJaguar2Device.h"
+#endif
+#if defined(DEVOURER_HAVE_JAGUAR3)
+#include "jaguar3/RtlJaguar3Device.h"
+#endif
+#if defined(DEVOURER_HAVE_8733B)
+#include "rtl8733b/Rtl8733bDevice.h"
+#endif
+#include "RtlAdapter.h"
+#include "SignalStop.h"
+#include "UsbOpen.h"
+#include "WiFiDriver.h"
+#include "IRtlRadio.h"
+#include "env_config.h"
+#include "usb_select.h"
+#if defined(DEVOURER_HAVE_PCIE)
+#include "PcieTransport.h"
+#endif
+
+#define USB_VENDOR_ID 0x0bda
+
+class ScopeExit {
+public:
+  explicit ScopeExit(std::function<void()> action)
+      : _action(std::move(action)) {}
+  ScopeExit(const ScopeExit &) = delete;
+  ScopeExit &operator=(const ScopeExit &) = delete;
+  ~ScopeExit() { Run(); }
+
+  void Run() {
+    if (!_active)
+      return;
+    _active = false;
+    _action();
+  }
+
+private:
+  std::function<void()> _action;
+  bool _active = true;
+};
+
+/* Known USB product IDs for the Realtek Jaguar 802.11ac family driven by this
+ * library: RTL8812AU (2T2R), RTL8811AU (1T1R cut), and RTL8814AU (4T4R RF /
+ * 3-SS baseband). */
+static constexpr uint16_t kRealtekProductIds[] = {
+    0x8812, /* RTL8812AU (also seen on some 8811AU boards) */
+    0x0811, /* RTL8811AU */
+    0xa811, /* RTL8811AU */
+    0xb811, /* RTL8811AU/8821AU variants */
+    0x8813, /* RTL8814AU (Realtek demoboard PID, used by CF-938AC/CF-960AC) */
+    0xb812, /* RTL8822BU WiFi-only (Jaguar2) */
+    0xb82c, /* RTL8822BU (Jaguar2) */
+    /* OEM-rebadged RTL8822BU (e.g. TP-Link Archer T3U 2357:012d) enumerate under
+     * a non-Realtek VID — reach those with DEVOURER_VID / DEVOURER_PID. */
+    0xc82c, /* RTL8822CU (Jaguar3) */
+    0xc82e, /* RTL8822CU (Jaguar3) */
+    0xc812, /* RTL8812CU WiFi-only (Jaguar3) */
+    /* 0x881a is shared silicon-wise: it ships on the Jaguar3 RTL8812EU and
+     * also on the Jaguar1 RTL8812AU-VS (observed on hardware: chip-id 0x04,
+     * 2T2R, EFUSE_HIDDEN_8812AU_VS). The factory resolves the generation from
+     * the SYS_CFG2 chip-id, never from the PID, so both dispatch correctly. */
+    0x881a, /* RTL8812EU (Jaguar3 EU) / RTL8812AU-VS (Jaguar1) */
+    0x881b, /* RTL8812EU variant (Jaguar3 EU) */
+    0x881c, /* RTL8812EU variant (Jaguar3 EU) */
+    0xa81a, /* RTL8812EU — LB-LINK BL-M8812EU2 (Jaguar3 EU) */
+    0xe822, /* RTL8822EU (Jaguar3 EU) */
+    0xa82a, /* RTL8822EU (Jaguar3 EU) */
+    0xf72b, /* RTL8731BU/RTL8733BU Wi-Fi function (HALMAC 87xx) */
+    0xb733, /* RTL8733BU combo module Wi-Fi function (vendor ID table) */
+};
+
+static int g_rx_count = 0;
+#if defined(DEVOURER_HAVE_JAGUAR1)
+static RtlJaguarDevice *g_rtl_device = nullptr;
+#endif
+
+/* Event sink for the demo's own JSONL emissions (packetProcessor is a free
+ * function) — points at the main() Logger's sink, set before Init(). */
+static devourer::EventSink *g_ev = nullptr;
+static std::unique_ptr<devourer::HopSchedule> g_hop_schedule;
+static uint64_t g_hop_slot_us = 0;
+static std::atomic<long long> g_hop_anchor_us{0};
+static std::atomic<long long> g_hop_last_marker_us{0};
+static std::atomic<uint64_t> g_hop_marker_slot{0};
+static std::atomic<uint32_t> g_hop_epoch{0};
+static std::atomic<long long> g_hop_last_retune_us{0};
+static std::atomic<bool> g_hop_decode_pending{false};
+/* Adaptive hopset (DEVOURER_HOP_ADAPTIVE=1): the RX is a HopsetFollower.
+ * packetProcessor (RX thread) feeds it decoded v2 markers + authenticated
+ * control frames; the lockstep loop (main thread) ticks it and asks the
+ * AdaptiveScheduleView for the slot channel — one mutex covers the machine
+ * and the view. */
+static std::mutex g_hopset_mu;
+static std::unique_ptr<devourer::hopset::HopsetKeys> g_hopset_keys;
+static std::unique_ptr<devourer::hopset::HopsetFollower> g_hopset_fol;
+static std::unique_ptr<devourer::hopset::AdaptiveScheduleView> g_hopset_view;
+static std::atomic<uint64_t> g_hopset_now_slot{0};
+/* Receiver-driven exclusion (DEVOURER_HOP_POLICY=1): the policy scores every
+ * closed dwell and proposes mask changes; proposals leave over the air on
+ * this same claimed handle (one bring-up, RX loop + occasional control TX),
+ * which is the reserved low-rate feedback opportunity. */
+static std::unique_ptr<devourer::hopset::HopsetPolicy> g_hopset_policy;
+static IRadio *g_hopset_dev = nullptr;
+static bool g_hopset_verbose_events = false;
+/* Per-dwell frame accounting, written lock-free from the RX worker and read
+ * by the hop loop when the slot closes. */
+static std::atomic<uint64_t> g_slot_acc_slot{UINT64_MAX};
+static std::atomic<uint32_t> g_slot_acc_frames{0}, g_slot_acc_crc{0};
+static std::atomic<int> g_slot_acc_rssi{0}, g_slot_acc_snr{0},
+    g_slot_acc_evm{0};
+static std::atomic<uint32_t> g_slot_dead_us{0};
+static long long steady_us() {
+  return std::chrono::duration_cast<std::chrono::microseconds>(
+             std::chrono::steady_clock::now().time_since_epoch())
+      .count();
+}
+
+/* Which schedule round an absolute slot falls in, under the state the view
+ * currently holds (round length is the active-channel count). */
+static uint64_t hopset_round_of(
+    const devourer::hopset::AdaptiveScheduleView &v, uint64_t slot,
+    size_t n_base) {
+  const auto &st = v.state();
+  const size_t k =
+      st.generation == 0 ? n_base : devourer::hopset::popcount64(st.active_mask);
+  return k && slot >= st.activate_slot ? (slot - st.activate_slot) / k : 0;
+}
+
+/* Air one authenticated control frame: robust 6M radiotap + a broadcast
+ * probe-request header (canonical SA) + the HopsetWire bytes. The caller's
+ * payload stream is never touched — control rides its own MPDU. */
+/* Fault-injection lever: with the uplink muted this side still decodes and
+ * follows everything, it simply cannot answer. That is a genuine one-way
+ * outage — the shape the transmitter's failsafe exists for — and it cannot be
+ * produced by merely disabling the policy, because a receiver with nothing to
+ * propose still announces itself. */
+static bool g_hopset_mute = false;
+
+static void hopset_send(const devourer::hopset::HopsetMsg &m) {
+  if (!g_hopset_dev || !g_hopset_keys || g_hopset_mute)
+    return;
+  static const uint8_t sa[6] = {0x57, 0x42, 0x75, 0x05, 0xd6, 0x00};
+  std::vector<uint8_t> frame =
+      devourer::build_stream_radiotap(devourer::parse_tx_mode_str("6M"));
+  uint8_t hdr[24] = {0x40, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff, 0xff,
+                     0xff};
+  std::memcpy(hdr + 10, sa, 6);
+  std::memcpy(hdr + 16, sa, 6);
+  hdr[22] = 0x90;
+  hdr[23] = 0x00;
+  frame.insert(frame.end(), hdr, hdr + 24);
+  const auto body = devourer::hopset::hopset_encode(m, *g_hopset_keys);
+  frame.insert(frame.end(), body.begin(), body.end());
+  g_hopset_dev->send_packet(frame.data(), frame.size());
+  /* Every control frame this side airs is a slot it is NOT listening in — the
+   * receiver is half duplex like everything else. One event per FRAME is what
+   * makes that cost measurable rather than assumed: proposals retry and the
+   * status beacon repeats, so counting decisions would undercount airtime. */
+  devourer::Ev(*g_ev, "hopset.ctl")
+      .f("v", 1)
+      .f("role", "rx")
+      .f("type", m.type == devourer::hopset::HT_PROPOSAL   ? "proposal"
+                 : m.type == devourer::hopset::HT_COMMIT   ? "commit"
+                                                           : "status")
+      .f("gen", (unsigned long long)m.generation)
+      .f("bytes", (unsigned long long)frame.size())
+      .f("slot", (unsigned long long)g_hopset_now_slot.load());
+}
+
+/* Frames the follower wants aired, queued under g_hopset_mu and sent after it
+ * is released. send_packet is synchronous on the USB3 generations, so sending
+ * inside the lock would stall the RX worker — which needs the same lock for
+ * every decoded marker — for the whole bus round trip. That starves the
+ * lockstep loop precisely when it can least afford it. */
+static std::vector<devourer::hopset::HopsetMsg> g_hopset_outbox;
+
+/* Execute the follower's actions (caller holds g_hopset_mu). */
+static void hopset_route(
+    const std::vector<devourer::hopset::HopsetAction> &acts) {
+  for (const auto &a : acts) {
+    if (a.kind == devourer::hopset::HopsetAction::Activate) {
+      g_hopset_view->set_state(a.state);
+      if (g_hopset_policy)
+        g_hopset_policy->on_activation(a.state.active_mask,
+                                       g_hopset_now_slot.load());
+    } else if (a.kind == devourer::hopset::HopsetAction::SendControl) {
+      g_hopset_outbox.push_back(a.msg);
+    } else if (a.kind == devourer::hopset::HopsetAction::Event) {
+      /* a rejected or timed-out proposal releases the policy's latch — the
+       * pure machine only reports the outcome, the host owns the handshake */
+      if (g_hopset_policy &&
+          a.event == devourer::hopset::HopsetEvent::Reject)
+        g_hopset_policy->clear_outstanding(hopset_round_of(
+            *g_hopset_view, g_hopset_now_slot.load(),
+            g_hopset_view->base_size()));
+      devourer::hopset::emit_action(*g_ev, a, "rx", g_hopset_now_slot.load());
+    }
+  }
+}
+
+/* Air whatever the follower queued. Must be called with g_hopset_mu NOT
+ * held. */
+static void hopset_flush() {
+  std::vector<devourer::hopset::HopsetMsg> pending;
+  {
+    std::lock_guard<std::mutex> lk(g_hopset_mu);
+    pending.swap(g_hopset_outbox);
+  }
+  for (const auto &m : pending)
+    hopset_send(m);
+}
+
+
+/* Best-effort current absolute slot from the fitted marker anchor. */
+static uint64_t hopset_slot_now() {
+  const long long anchor = g_hop_anchor_us.load();
+  const long long now = steady_us();
+  if (anchor > 0 && now > anchor && g_hop_slot_us)
+    return static_cast<uint64_t>((now - anchor) /
+                                 static_cast<long long>(g_hop_slot_us));
+  return g_hop_marker_slot.load();
+}
+
+/* Process-start reference for the init.timing events (see src/InitTimer.h).
+ * stage=demo.first_rx_frame is the end-to-end "ready to RX" mark:
+ * exec → first 802.11 frame delivered to the packet processor. */
+static const std::chrono::steady_clock::time_point g_proc_start =
+    std::chrono::steady_clock::now();
+static long long ms_since_start() {
+  return std::chrono::duration_cast<std::chrono::milliseconds>(
+             std::chrono::steady_clock::now() - g_proc_start)
+      .count();
+}
+
+/* DEVOURER_TX_STATUS=1: surface chip-side C2H frames (TX status reports,
+ * various diagnostic pings) on `fw.c2h` events with a raw hex dump, plus
+ * a best-effort decode of the 8814A TX_RPT payload layout. The C2H
+ * sub-type ID isn't enumerated in the vendored headers, so the decode is
+ * speculative — the raw hex stays in the line so an observer can
+ * validate the sub-type against on-air capture.
+ *
+ * DEVOURER_QUEUE_POLL_MS=N: periodic snapshot of the 8814A REG_FIFOPAGE_INFO
+ * registers, throttled to one `tx.queue` event per second on RX hook.
+ * 8814-only (8812/8821 don't expose these registers as per-queue free pages). */
+static const bool g_tx_status_enabled =
+    std::getenv("DEVOURER_TX_STATUS") != nullptr;
+static const uint32_t g_qd_poll_ms = []() -> uint32_t {
+  const char *e = std::getenv("DEVOURER_QUEUE_POLL_MS");
+  return e ? static_cast<uint32_t>(std::strtoul(e, nullptr, 0)) : 0u;
+}();
+
+/* DEVOURER_THERMAL_POLL_MS=N: periodic snapshot of the chip thermal meter
+ * (RF[A][0x42][15:10]), one `thermal` event per interval. Works on every
+ * generation. 0 = disabled. DEVOURER_THERMAL_WARN_DELTA overrides the warn
+ * threshold (thermal units above the EFUSE baseline; default 15).
+ *
+ * Telemetry only: the meter is a PA-bias tracking index, not a calibrated °C
+ * sensor, and docs/warm-tx-degradation.md shows it is not a validated
+ * degradation predictor (delivery drifts while the meter stays pinned). The
+ * poller therefore emits and warns; it never stops RX or refuses TX. */
+static const uint32_t g_thermal_poll_ms = []() -> uint32_t {
+  const char *e = std::getenv("DEVOURER_THERMAL_POLL_MS");
+  return e ? static_cast<uint32_t>(std::strtoul(e, nullptr, 0)) : 0u;
+}();
+static const int g_thermal_warn_delta = []() -> int {
+  const char *e = std::getenv("DEVOURER_THERMAL_WARN_DELTA");
+  return e ? std::atoi(e) : 15;
+}();
+
+/* DEVOURER_RX_DUMP_CSI=hex,hex,... (or "0x1a,0x20,0x40"): F2 research
+ * spike. On each canonical-SA RX frame (first N frames), read BB
+ * dbgport 0x8FC at each selector and emit a csi.hit event
+ *   {"ev":"csi.hit","selector":"0xNN","value":"0xNNNNNNNN"}
+ *
+ * This is a SELECTOR-SWEEP framework — the actual per-subcarrier IQ
+ * selector is missing from in-tree sources (see BbDbgportReader.h for
+ * details), so this knob exists so a researcher can try selectors at
+ * runtime, capture the resulting words, and look for plausible
+ * IQ-like patterns without recompiling. Throttled to the first 8
+ * canonical-SA frames to bound brick-risk.
+ *
+ * BRICK RISK: enabling this writes to 0x8FC while RX is live. If the
+ * chip stops responding after a sweep, the reader self-wedges (see
+ * csi.wedged) and refuses further writes; recover with
+ * libusb_reset_device / usbreset / power-cycle. */
+static const std::vector<uint32_t> g_csi_selectors = []() -> std::vector<uint32_t> {
+  const char *e = std::getenv("DEVOURER_RX_DUMP_CSI");
+  if (!e || !*e) return {};
+  std::vector<uint32_t> out;
+  std::string s = e;
+  size_t pos = 0;
+  while (pos < s.size()) {
+    size_t comma = s.find(',', pos);
+    std::string tok = s.substr(pos, comma == std::string::npos
+                                        ? std::string::npos
+                                        : comma - pos);
+    if (!tok.empty()) {
+      out.push_back(static_cast<uint32_t>(std::strtoul(tok.c_str(), nullptr, 0)));
+    }
+    if (comma == std::string::npos) break;
+    pos = comma + 1;
+  }
+  return out;
+}();
+static constexpr int kCsiMaxFrames = 8;
+
+/* DEVOURER_LA_CAPTURE=<trig>[/<rate>M][/dma<N>][/port:0xNNN[.hdr<H>][.bit<B>]]
+ *                     [/edge<0|1>][/t<us>][/all]
+ * One-shot LA-mode (phydm logic-analyzer) IQ capture into the TX packet
+ * buffer, dumped to DEVOURER_LA_OUT (default /tmp/la_capture.bin) as a
+ * 32-byte "DVLA" header + little-endian u64 records (tools/la_decode.py).
+ * <trig>: manual (immediate) | crcok | crcfail | cca (MAC-event ADC
+ * triggers) | bb (BB dbg-port bit, needs /port+.bit) | mac (MAC dbg dump).
+ * <rate>M: 80M 40M 20M 10M 5M 2.5M 1.25M 160M (default 20M).
+ * Runs once from a worker thread after RX is live (+DEVOURER_LA_DELAY_MS,
+ * default 2000, so bring-up/calibration settles); DEVOURER_LA_MAX caps the
+ * readback sample count (readback is 2 control-reads per 8-byte sample —
+ * a full 128 KB window takes tens of seconds on USB2).
+ * Supported: 8814A / 8822B / 8821C(cut B+) / 8822C / 8822E. The 8812A and
+ * 8821A have no LA block (vendor support macro) — a probe there exits with
+ * la.timeout. BRICK RISK: same class as DEVOURER_RX_DUMP_CSI; the module
+ * save/restores every touched register and self-wedges loudly (la.wedged)
+ * if the chip stops responding. Not combinable with DEVOURER_RX_SWEEP /
+ * lockstep hopping (those paths exit before the capture thread starts). */
+static const char *g_la_spec = std::getenv("DEVOURER_LA_CAPTURE");
+static const char *g_la_out = []() {
+  const char *e = std::getenv("DEVOURER_LA_OUT");
+  return (e && *e) ? e : "/tmp/la_capture.bin";
+}();
+static const uint32_t g_la_delay_ms = []() -> uint32_t {
+  const char *e = std::getenv("DEVOURER_LA_DELAY_MS");
+  return (e && *e) ? static_cast<uint32_t>(std::strtoul(e, nullptr, 0)) : 2000;
+}();
+static const uint32_t g_la_max = []() -> uint32_t {
+  const char *e = std::getenv("DEVOURER_LA_MAX");
+  return (e && *e) ? static_cast<uint32_t>(std::strtoul(e, nullptr, 0)) : 0;
+}();
+
+/* Parse the DEVOURER_LA_CAPTURE spec. Returns false (+logs) on a token it
+ * doesn't recognize. */
+static bool parse_la_spec(const char *spec, devourer::LaParams &p) {
+  std::string s = spec;
+  size_t pos = 0;
+  bool first = true;
+  while (pos <= s.size()) {
+    size_t slash = s.find('/', pos);
+    std::string tok = s.substr(
+        pos, slash == std::string::npos ? std::string::npos : slash - pos);
+    if (first) {
+      first = false;
+      if (tok == "manual") {
+        p.trig_mode = devourer::LaTrigMode::AdcMacTrig;
+        p.mac_sig = devourer::LaMacSig::Manual;
+      } else if (tok == "crcok") {
+        p.trig_mode = devourer::LaTrigMode::AdcMacTrig;
+        p.mac_sig = devourer::LaMacSig::CrcOk;
+      } else if (tok == "crcfail") {
+        p.trig_mode = devourer::LaTrigMode::AdcMacTrig;
+        p.mac_sig = devourer::LaMacSig::CrcFail;
+      } else if (tok == "cca") {
+        p.trig_mode = devourer::LaTrigMode::AdcMacTrig;
+        p.mac_sig = devourer::LaMacSig::Cca;
+      } else if (tok == "bb") {
+        p.trig_mode = devourer::LaTrigMode::BbTrig;
+      } else if (tok == "mac") {
+        p.trig_mode = devourer::LaTrigMode::MacDump;
+      } else {
+        return false;
+      }
+    } else if (!tok.empty()) {
+      if (tok.back() == 'M') {
+        static const char *rates[] = {"80M", "40M",  "20M",   "10M",
+                                      "5M",  "2.5M", "1.25M", "160M"};
+        bool hit = false;
+        for (int i = 0; i < 8; i++)
+          if (tok == rates[i]) {
+            p.smp_rate = static_cast<uint8_t>(i);
+            hit = true;
+          }
+        if (!hit)
+          return false;
+      } else if (tok.rfind("dma", 0) == 0) {
+        p.dma_type = static_cast<uint8_t>(std::strtoul(tok.c_str() + 3,
+                                                       nullptr, 0));
+      } else if (tok.rfind("port:", 0) == 0) {
+        /* port:0xNNN[.hdr<H>][.bit<B>] */
+        std::string rest = tok.substr(5);
+        size_t dot;
+        while ((dot = rest.rfind('.')) != std::string::npos) {
+          std::string sub = rest.substr(dot + 1);
+          rest.resize(dot);
+          if (sub.rfind("hdr", 0) == 0)
+            p.hdr_sel = static_cast<uint8_t>(std::strtoul(sub.c_str() + 3,
+                                                          nullptr, 0));
+          else if (sub.rfind("bit", 0) == 0)
+            p.trig_sel = static_cast<uint8_t>(std::strtoul(sub.c_str() + 3,
+                                                           nullptr, 0));
+          else
+            return false;
+        }
+        p.dbg_port = static_cast<uint32_t>(std::strtoul(rest.c_str(),
+                                                        nullptr, 0));
+      } else if (tok.rfind("edge", 0) == 0) {
+        p.edge = static_cast<uint8_t>(std::strtoul(tok.c_str() + 4,
+                                                   nullptr, 0)) & 1;
+      } else if (tok[0] == 't') {
+        p.trigger_time_us = static_cast<uint32_t>(std::strtoul(tok.c_str() + 1,
+                                                               nullptr, 0));
+      } else if (tok == "all") {
+        p.buff_all = true;
+      } else {
+        return false;
+      }
+    }
+    if (slash == std::string::npos)
+      break;
+    pos = slash + 1;
+  }
+  return true;
+}
+
+/* Dispatch la_capture to whichever generation this device is (research
+ * helpers are concrete-type methods, not on IRadio). Returns an
+ * empty function when the generation has no LA support wired yet. */
+static std::function<devourer::LaResult(const devourer::LaParams &)>
+la_runner_for(IRadio *dev) {
+#if defined(DEVOURER_HAVE_JAGUAR1)
+  if (auto *j1 = dynamic_cast<RtlJaguarDevice *>(dev))
+    return [j1](const devourer::LaParams &p) { return j1->la_capture(p); };
+#endif
+#if defined(DEVOURER_HAVE_JAGUAR2)
+  if (auto *j2 = dynamic_cast<RtlJaguar2Device *>(dev))
+    return [j2](const devourer::LaParams &p) { return j2->la_capture(p); };
+#endif
+#if defined(DEVOURER_HAVE_JAGUAR3)
+  if (auto *j3 = dynamic_cast<RtlJaguar3Device *>(dev))
+    return [j3](const devourer::LaParams &p) { return j3->la_capture(p); };
+#endif
+  (void)dev;
+  return {};
+}
+
+/* Run the one-shot capture, dump the buffer, emit la.* events. */
+static void run_la_capture(
+    const std::function<devourer::LaResult(const devourer::LaParams &)> &runner,
+    const devourer::LaParams &p) {
+  const auto t0 = std::chrono::steady_clock::now();
+  devourer::LaResult r = runner(p);
+  const long long ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                           std::chrono::steady_clock::now() - t0)
+                           .count();
+  if (r.wedged) {
+    devourer::Ev(*g_ev, "la.wedged");
+    return;
+  }
+  if (r.no_la_block) {
+    devourer::Ev(*g_ev, "la.nosupport").f("ms", ms);
+    return;
+  }
+  if (r.poll_timeout) {
+    devourer::Ev(*g_ev, "la.timeout").f("ms", ms);
+    return;
+  }
+  if (r.ok) {
+    /* 32-byte self-describing header + LE u64 records (tools/la_decode.py). */
+    FILE *f = std::fopen(g_la_out, "wb");
+    if (f) {
+      uint8_t hdr[32] = {'D', 'V', 'L', 'A', 1 /*ver*/};
+      hdr[5] = static_cast<uint8_t>(p.trig_mode);
+      hdr[6] = static_cast<uint8_t>(p.mac_sig);
+      hdr[7] = p.smp_rate;
+      hdr[8] = p.dma_type;
+      hdr[9] = r.round_up ? 1 : 0;
+      const uint32_t n = static_cast<uint32_t>(r.samples.size());
+      std::memcpy(hdr + 12, &n, 4);
+      std::memcpy(hdr + 16, &r.finish_addr, 4);
+      std::memcpy(hdr + 20, &p.trigger_time_us, 4);
+      std::fwrite(hdr, 1, sizeof(hdr), f);
+      std::fwrite(r.samples.data(), 8, r.samples.size(), f);
+      std::fclose(f);
+    }
+    static const int kRateMhz10[] = {800, 400, 200, 100, 50, 25, 12, 1600};
+    devourer::Ev(*g_ev, "la.capture")
+        .f("ok", 1)
+        .f("samples", r.samples.size())
+        .hexf("finish", r.finish_addr, 4)
+        .f("wrap", r.round_up ? 1 : 0)
+        .f("rate_mhz10", kRateMhz10[p.smp_rate & 7])
+        .f("dma", p.dma_type)
+        .f("file", f ? g_la_out : "")
+        .f("ms", ms);
+  } else {
+    devourer::Ev(*g_ev, "la.capture").f("ok", 0).f("ms", ms);
+  }
+}
+
+/* DEVOURER_RX_ENERGY_MS=N: periodic frame-free RX energy / channel-busy
+ * telemetry — the read side of DEVOURER_CW_TONE. Each interval emits one
+ * rx.energy event combining the chip's phydm FA/CCA counters + IGI
+ * (IRtlRadio::GetRxEnergy, frame-free, all three generations) with a rolling
+ * per-frame RSSI/SNR aggregate. A second adapter running this detects the first
+ * adapter's CW carrier as a jump in cca_ofdm / fa_ofdm and a rise in igi.
+ * 0 = disabled. */
+static const uint32_t g_rx_energy_ms = []() -> uint32_t {
+  const char *e = std::getenv("DEVOURER_RX_ENERGY_MS");
+  return (e && *e) ? static_cast<uint32_t>(std::strtoul(e, nullptr, 0)) : 0;
+}();
+
+/* DEVOURER_LINKHEALTH=1 — emit a link.health verdict event alongside
+ * each rx.energy window (src/LinkHealth.h): the sensor tuple classified
+ * into a plain-language cause + fix. Rides the DEVOURER_RX_ENERGY_MS cadence, so
+ * that must be set too (a linkhealth verdict needs the same window snapshot). */
+static const bool g_linkhealth = []() -> bool {
+  const char *e = std::getenv("DEVOURER_LINKHEALTH");
+  return e && *e && std::strcmp(e, "0") != 0;
+}();
+
+/* DEVOURER_RXQUALITY=1 — emit an rx.quality event from the library's
+ * GetRxQuality() feed (the runtime API a linked adaptive-link controller reads).
+ * Rides the DEVOURER_RX_ENERGY_MS cadence like linkhealth. */
+static const bool g_rxquality = []() -> bool {
+  const char *e = std::getenv("DEVOURER_RXQUALITY");
+  return e && *e && std::strcmp(e, "0") != 0;
+}();
+
+/* DEVOURER_RX_SWEEP="1,6,11" | "36-48/4" | "5170-5250/5": live coarse spectrum
+ * sweep. Cycle the listed bins (SweepSpec grammar: channels, channel ranges,
+ * or MHz ranges — the latter for issue-#149-style narrowband maps), dwelling
+ * DEVOURER_RX_SWEEP_DWELL_MS (default 300) on each, and emit one
+ * rx.energy event (with ch=N) per bin. The RX loop runs on a worker thread so
+ * the main thread is free to retune (FastRetune) between reads — a live
+ * energy-vs-frequency map that localizes an interferer (peaks, or dips on the
+ * 1T1R parts that saturate, at the tone's channel). Empty = disabled. */
+static const std::vector<int> g_rx_sweep =
+    devourer::parse_sweep_spec(std::getenv("DEVOURER_RX_SWEEP"));
+static const uint32_t g_rx_sweep_dwell_ms = []() -> uint32_t {
+  const char *e = std::getenv("DEVOURER_RX_SWEEP_DWELL_MS");
+  return (e && *e) ? static_cast<uint32_t>(std::strtoul(e, nullptr, 0)) : 300;
+}();
+
+/* Rolling per-frame RSSI/SNR/EVM aggregate (the frame-driven signal, all
+ * gens): updated per received frame in packetProcessor, drained each interval
+ * by the energy emitter and per dwell by the sweep loop. EVM counts only
+ * frames that report one (CCK / non-type1 phy-status leaves it 0), so a mixed
+ * stream doesn't bias the mean toward 0. */
+static std::mutex g_rxagg_mu;
+struct RxAgg {
+  uint32_t n = 0;
+  int32_t rssi_sum = 0, rssi_max = -128, snr_sum = 0, snr_min = 127;
+  int32_t evm_sum = 0;
+  uint32_t evm_n = 0;
+  /* Per-encoding split — what an adaptive controller compares live (BCC vs
+   * LDPC delivery on the same link). Counts what the chip *reports*: on the
+   * 8814A ldpc reads 0 even on LDPC frames (AdapterCaps.ldpc_rx_flag). */
+  uint32_t n_ldpc = 0, n_stbc = 0;
+  /* FCS/ICV-failed frames in the window — nonzero only under
+   * DEVOURER_RX_KEEP_CORRUPTED (the parser drops them otherwise). The
+   * active-link delivery evidence a channel-migration policy consumes. */
+  uint32_t n_crc = 0, n_icv = 0;
+  void add(int rssi, int snr, int evm, bool ldpc = false, bool stbc = false,
+           bool crc = false, bool icv = false) {
+    ++n;
+    rssi_sum += rssi;
+    if (rssi > rssi_max) rssi_max = rssi;
+    snr_sum += snr;
+    if (snr < snr_min) snr_min = snr;
+    if (evm != 0) { evm_sum += evm; ++evm_n; }
+    if (ldpc) ++n_ldpc;
+    if (stbc) ++n_stbc;
+    if (crc) ++n_crc;
+    if (icv) ++n_icv;
+  }
+};
+static RxAgg g_rxagg;
+
+/* The canonical txdemo beacon SA (same constant as examples/tx/main.cpp and
+ * tests/regress.py CANONICAL_SA — change all three together): the
+ * rx.txhit matcher and the "canon" aggregate filter below. */
+static const uint8_t kTxSa[6] = {0x57, 0x42, 0x75, 0x05, 0xd6, 0x00};
+
+/* DEVOURER_RX_AGG_SA: restrict the per-frame aggregate to frames whose SA
+ * matches — the active-sounding filter, so ambient traffic doesn't pollute the
+ * per-bin link stats (a sweep dwell hears everything on the bin; H(f) wants
+ * only the probe TX). "canon" = kTxSa; "aa:bb:cc:dd:ee:ff" = that address;
+ * unset/"any" = every frame (existing behaviour). */
+static bool g_agg_sa_filter = false;
+static uint8_t g_agg_sa[6];
+static const bool g_agg_sa_parsed = []() {
+  const char *e = std::getenv("DEVOURER_RX_AGG_SA");
+  if (!e || !*e || std::strcmp(e, "any") == 0)
+    return false;
+  if (std::strcmp(e, "canon") == 0) {
+    std::memcpy(g_agg_sa, kTxSa, 6);
+    g_agg_sa_filter = true;
+    return true;
+  }
+  unsigned b[6];
+  if (std::sscanf(e, "%x:%x:%x:%x:%x:%x", &b[0], &b[1], &b[2], &b[3], &b[4],
+                  &b[5]) == 6) {
+    for (int i = 0; i < 6; i++)
+      g_agg_sa[i] = static_cast<uint8_t>(b[i]);
+    g_agg_sa_filter = true;
+    return true;
+  }
+  return false;
+}();
+/* DEVOURER_RX_AGG_SA also re-gates the per-frame rx.frame stream in
+ * packetProcessor: env unset keeps the historic canonical-SA-only stream;
+ * "canon"/mac narrows it to that SA; "any" widens it to every frame. A
+ * separate presence flag because "any" parses to no filter (above) yet must
+ * widen the stream gate, while unset must not. */
+static const bool g_agg_sa_env = []() {
+  const char *e = std::getenv("DEVOURER_RX_AGG_SA");
+  return e != nullptr && *e != '\0';
+}();
+static bool agg_sa_match(const Packet &packet) {
+  if (!g_agg_sa_filter)
+    return true;
+  /* SA at offset 10 (FC + duration + addr1) — same layout the tx-hit matcher
+   * keys on; frames too short to carry it don't count. */
+  return packet.Data.size() >= 16 &&
+         std::memcmp(packet.Data.data() + 10, g_agg_sa, 6) == 0;
+}
+
+/* DEVOURER_RX_SINK_SPIN_US: busy-spin this many microseconds at the top of
+ * every delivered frame in packetProcessor, modelling the inline consumer cost
+ * (in PixelPilot: wfb-ng FEC+AES+UDP, ~20-50 us/frame) that in the async ring
+ * delays the URB resubmit. packetProcessor runs once per aggregated MPDU, so
+ * this is a per-subframe cost — the same granularity the real consumer pays.
+ * 0/unset = off. */
+static const long g_rx_sink_spin_us = []() {
+  const char *e = std::getenv("DEVOURER_RX_SINK_SPIN_US");
+  return e ? std::strtol(e, nullptr, 0) : 0L;
+}();
+
+/* DEVOURER_RX_SINK_STALL_MS / _EVERY: a PERIODIC consumer stall — every _EVERY
+ * frames, busy-spin _MS milliseconds — modelling an occasional hiccup (GC pause,
+ * scheduler preemption of the consumer) on a consumer that otherwise keeps up.
+ * This is the regime where moving the consumer off the pump thread (spsc-fat)
+ * matters: async/reorder consume on the pump, so a stall drains the ring and
+ * drops frames; spsc-fat keeps the pump re-arming and queues the backlog. */
+static const long g_rx_stall_ms = []() {
+  const char *e = std::getenv("DEVOURER_RX_SINK_STALL_MS");
+  return e ? std::strtol(e, nullptr, 0) : 0L;
+}();
+static const long g_rx_stall_every = []() {
+  const char *e = std::getenv("DEVOURER_RX_SINK_STALL_EVERY");
+  const long v = e ? std::strtol(e, nullptr, 0) : 100L;
+  return v > 0 ? v : 100L; /* 0/garbage would divide-by-zero the modulo */
+}();
+
+/* DEVOURER_RX_PCTR: emit a lean rx.seq event (payload counter + tsfl + crc +
+ * aggregate markers) per SA-matched frame — the ground-truth per-frame delivery
+ * sequence for the RX-ring loss study. Deliberately lean (no body hex) so the
+ * emit cost does not itself perturb the pump thread it measures. The counter is
+ * the u32 txdemo stamps at the QoS-Data body start (MPDU offset 26). */
+static const bool g_rx_pctr = []() {
+  const char *e = std::getenv("DEVOURER_RX_PCTR");
+  return e != nullptr && std::strcmp(e, "0") != 0;
+}();
+
+/* Emit the frame-free NHM power histogram (IRtlRadio::GetRxEnergy fills it) as
+ * a distinct rx.nhm event so it never disturbs the rx.energy
+ * fields its consumers key on. `peak` = the fullest bucket (0 = quiet
+ * noise floor, higher = energy is landing in a higher power band, e.g. under an
+ * interferer); `busy` = percent of samples above the lowest bucket; `hist` =
+ * the 12 raw bucket counts (IGI-referenced, low→high power). ch<0 omits the
+ * channel field (steady-state emitter); ch>=0 tags it (sweep). */
+/* The two CCX window products, appended to both rx.energy emitters.
+ *
+ * `clm` is busy AIRTIME percent (hardware 4 us ticks with CCA asserted) and
+ * `nhm_env` is the percent of the NHM histogram sitting above the receiver's
+ * own noise floor. Read them together: energy that lifts nhm_env without
+ * lifting clm is an emitter the baseband does not recognise as 802.11 — which
+ * is exactly what a frame sniffer reports as a free channel. Both go null when
+ * the generation or the window did not produce them. */
+static void emit_ccx(devourer::Ev &ev, const RxEnergy &e) {
+  if (e.valid_clm)
+    ev.f("clm", e.clm_ratio_pct);
+  else
+    ev.f("clm", nullptr);
+  if (e.valid_nhm)
+    ev.f("nhm_env", e.nhm_env_ratio_pct);
+  else
+    ev.f("nhm_env", nullptr);
+}
+
+static void emit_nhm(const RxEnergy &e, int ch) {
+  if (!e.valid_nhm)
+    return;
+  uint32_t total = 0, peak = 0;
+  int peak_k = 0;
+  int hist[12];
+  for (int k = 0; k < 12; k++) {
+    total += e.nhm[k];
+    if (e.nhm[k] > peak) { peak = e.nhm[k]; peak_k = k; }
+    hist[k] = static_cast<int>(e.nhm[k]);
+  }
+  int busy = total ? static_cast<int>(100 * (total - e.nhm[0]) / total) : 0;
+  devourer::Ev ev(*g_ev, "rx.nhm");
+  if (ch >= 0)
+    ev.f("ch", ch);
+  /* `busy` is the naive mass-above-bucket-0 and rails at ~100 on a quiet
+   * channel; `ratio` is the vendor's rounded form of the same thing, and `env`
+   * is that with the receiver's own floor cluster removed. Compare arms on
+   * `env`. */
+  ev.f("peak", peak_k).f("busy", busy)
+      .f("ratio", e.nhm_ratio_pct).f("env", e.nhm_env_ratio_pct)
+      .f("dur", e.nhm_duration).arr("hist", hist, 12);
+}
+
+static void packetProcessor(const Packet &packet) {
+  /* C2H packets carry chip-side status updates, not 802.11 frames. Handle
+   * them up front so the rest of this function (which assumes a normal
+   * 802.11 MPDU layout) doesn't try to read SA bytes from a C2H payload. */
+  if (packet.RxAtrib.pkt_rpt_type == RX_PACKET_TYPE::C2H_PACKET) {
+    if (g_tx_status_enabled) {
+      devourer::Ev(*g_ev, "fw.c2h")
+          .f("len", packet.Data.size())
+          .hex("bytes", packet.Data.data(), packet.Data.size());
+      /* Best-effort 8814A TX_RPT decode. The GET_8814A_C2H_TX_RPT_*
+       * macros (hal/rtl8814a_cmd.h:118-125) read from a "_Header" pointer
+       * — which, in upstream Realtek code, points one or two bytes past
+       * the C2H frame start (after cmd_id [+ seq]). We try the two most
+       * common offsets (1 and 2) and emit each; an observer can pick the
+       * one whose queue_id / rate / retry values look plausible. */
+      if (packet.Data.size() >= 8) {
+        for (size_t hoff : {size_t(1), size_t(2)}) {
+          if (packet.Data.size() < hoff + 6) continue;
+          const uint8_t *h = packet.Data.data() + hoff;
+          uint8_t  queue   = h[0] & 0x1f;
+          uint8_t  retry   = h[2] & 0x3f;
+          uint16_t qt_raw  = static_cast<uint16_t>(h[3] | (h[4] << 8));
+          uint32_t qt_us   = static_cast<uint32_t>(qt_raw) * 256u;
+          uint8_t  rate    = h[5];
+          devourer::Ev(*g_ev, "tx.status")
+              .f("hoff", hoff)
+              .f("queue", queue)
+              .f("retry", retry)
+              .f("airtime_us", qt_us)
+              .f("rate", rate);
+        }
+      }
+    }
+    return;
+  }
+
+  ++g_rx_count;
+
+  /* Model the inline consumer cost that delays URB resubmit in the async ring
+   * (DEVOURER_RX_SINK_SPIN_US). This runs on the libusb pump thread — the very
+   * thread whose resubmit latency the rx.ring telemetry measures — so it
+   * reproduces the burst-starvation mechanism on a host with headroom to
+   * spare. */
+  if (g_rx_sink_spin_us > 0) {
+    const auto deadline = std::chrono::steady_clock::now() +
+                          std::chrono::microseconds(g_rx_sink_spin_us);
+    while (std::chrono::steady_clock::now() < deadline) {
+      /* busy-wait: a sleep would yield the pump thread and defeat the model */
+    }
+  }
+  if (g_rx_stall_ms > 0 && (g_rx_count % g_rx_stall_every) == 0) {
+    const auto deadline = std::chrono::steady_clock::now() +
+                          std::chrono::milliseconds(g_rx_stall_ms);
+    while (std::chrono::steady_clock::now() < deadline) {
+      /* periodic consumer hiccup */
+    }
+  }
+
+  /* HE Trigger frame (802.11 control, FC=0x24) — aired in a legacy PPDU, so
+   * even an 11ac witness captures the bytes. Decode + surface it as rx.trigger
+   * so a monitor validates what an AX AP's F2P / UL_FIXINFO scheduler airs
+   * (fields vs the commanded config) and resolves the fw RU/mode encoding. */
+  if (devourer::is_trigger_frame(packet.Data.data(), packet.Data.size())) {
+    devourer::TriggerInfo ti;
+    if (devourer::parse_trigger(packet.Data.data(), packet.Data.size(), ti)) {
+      auto ev = devourer::Ev(*g_ev, "rx.trigger");
+      ev.f("ttype", ti.trigger_type)
+          .f("ul_bw", ti.ul_bw)
+          .f("gi_ltf", ti.gi_ltf)
+          .f("nltf", ti.num_he_ltf)
+          .f("ap_pwr", ti.ap_tx_power)
+          .f("users", ti.n_users);
+      if (ti.n_users > 0)
+        ev.f("u0_aid", ti.users[0].aid12)
+            .f("u0_ru", ti.users[0].ru_alloc)
+            .f("u0_mcs", ti.users[0].mcs)
+            .f("u0_ss", ti.users[0].ss);
+    }
+    return; /* a trigger is not a data/mgmt frame — nothing else to match */
+  }
+
+  /* The sync marker's only integrity is the frame FCS — it is a plain vendor
+   * IE, unlike the authenticated control frames. So a frame the chip flagged
+   * must never reach it: under DEVOURER_RX_KEEP_CORRUPTED (which the salvage
+   * path needs, and which the FPV link runs with) a corrupted marker whose
+   * seed fingerprint happened to survive was decoded as a genuine generation
+   * change, and the follower dropped lockstep on it. */
+  if (g_hop_schedule && packet.Data.size() >= 16 &&
+      !packet.RxAtrib.crc_err && !packet.RxAtrib.icv_err &&
+      std::memcmp(packet.Data.data() + 10, kTxSa, 6) == 0) {
+    /* Adaptive mode rides the v2 marker (v1 layout + generation/mask_fp);
+     * fixed mode stays on v1 — each decoder rejects the other version. */
+    devourer::HopSyncMarker m;
+    bool have = false;
+    uint32_t mk_gen = 0, mk_maskfp = 0;
+    if (g_hopset_fol) {
+      devourer::hopset::HopSyncMarkerV2 m2;
+      if (devourer::hopset::HopSyncMarkerV2::decode(packet.Data.data(),
+                                                    packet.Data.size(), m2)) {
+        m.fingerprint = m2.fingerprint;
+        m.epoch = m2.epoch;
+        m.slot = m2.slot;
+        m.phase_us = m2.phase_us;
+        mk_gen = m2.generation;
+        mk_maskfp = m2.mask_fp;
+        have = true;
+      }
+    } else {
+      have = devourer::HopSyncMarker::decode(packet.Data.data(),
+                                             packet.Data.size(), m);
+    }
+    if (have && m.fingerprint == g_hop_schedule->fingerprint() &&
+        m.phase_us < g_hop_slot_us) {
+      const long long now = steady_us();
+      const long long observed = now - static_cast<long long>(m.phase_us) -
+                                 static_cast<long long>(m.slot * g_hop_slot_us);
+      long long anchor = g_hop_anchor_us.load();
+      if (!anchor || g_hop_epoch.load() != m.epoch)
+        anchor = observed;
+      else {
+        long long e = observed - anchor;
+        if (e > 2000)
+          e = 2000;
+        if (e < -2000)
+          e = -2000;
+        anchor += e / 4;
+      }
+      g_hop_anchor_us.store(anchor);
+      g_hop_last_marker_us.store(now);
+      g_hop_marker_slot.store(m.slot);
+      g_hop_epoch.store(m.epoch);
+      if (g_hop_decode_pending.exchange(false)) {
+        const long long dead = now - g_hop_last_retune_us.load();
+        g_slot_dead_us.store(
+            static_cast<uint32_t>(dead > 0 && dead < 1000000 ? dead : 0));
+        devourer::Ev(*g_ev, "hop.rx")
+            .f("state", "decode")
+            .f("slot", (unsigned long long)m.slot)
+            .f("dead_us", dead);
+      }
+      if (g_hopset_fol) {
+        /* missed-transition tripwire: does the advertised (generation,
+         * mask fingerprint) match a state we hold (current or pending)? */
+        std::lock_guard<std::mutex> lk(g_hopset_mu);
+        const auto &cs = g_hopset_fol->state();
+        bool matches =
+            mk_gen == cs.generation &&
+            mk_maskfp == devourer::hopset::mask_fp(
+                             *g_hopset_keys, cs.generation, cs.active_mask);
+        if (!matches && g_hopset_fol->has_pending()) {
+          const auto &ps = g_hopset_fol->pending();
+          matches =
+              mk_gen == ps.generation &&
+              mk_maskfp == devourer::hopset::mask_fp(
+                               *g_hopset_keys, ps.generation, ps.active_mask);
+        }
+        hopset_route(g_hopset_fol->on_marker(mk_gen, matches, m.slot));
+      }
+      hopset_flush();
+    }
+  }
+
+  /* Authenticated hopset control frames (probe-req header + HopsetWire bytes,
+   * canonical SA): commits and the authority's status beacon — the follower's
+   * adoption/recovery inputs. */
+  if (g_hopset_fol && packet.Data.size() > 24 + 16 &&
+      packet.Data[0] == 0x40 &&
+      std::memcmp(packet.Data.data() + 10, kTxSa, 6) == 0) {
+    devourer::hopset::HopsetMsg hm;
+    if (devourer::hopset::hopset_decode(packet.Data.data() + 24,
+                                        packet.Data.size() - 24,
+                                        *g_hopset_keys, 0, hm) ==
+        devourer::hopset::HopsetReason::None) {
+      const uint64_t slot = hopset_slot_now();
+      std::lock_guard<std::mutex> lk(g_hopset_mu);
+      g_hopset_now_slot.store(slot);
+      if (hm.type == devourer::hopset::HT_COMMIT)
+        hopset_route(g_hopset_fol->on_commit(hm, slot));
+      else if (hm.type == devourer::hopset::HT_STATUS)
+        hopset_route(g_hopset_fol->on_status(hm, slot));
+    }
+    hopset_flush();
+  }
+
+  /* Per-dwell delivery accounting for the exclusion policy: count this
+   * transmitter's frames (and the corrupt ones, when the RX surfaces them)
+   * against the slot the hop loop is currently parked on. Lock-free — the
+   * loop drains it when the dwell closes. */
+  if (g_hopset_policy && packet.Data.size() >= 16 &&
+      std::memcmp(packet.Data.data() + 10, kTxSa, 6) == 0) {
+    g_slot_acc_frames.fetch_add(1);
+    if (packet.RxAtrib.crc_err || packet.RxAtrib.icv_err)
+      g_slot_acc_crc.fetch_add(1);
+    g_slot_acc_rssi.fetch_add(packet.RxAtrib.rssi[0]);
+    g_slot_acc_snr.fetch_add(packet.RxAtrib.snr[0]);
+    g_slot_acc_evm.fetch_add(packet.RxAtrib.evm[0]);
+  }
+
+  /* Feed the rolling per-frame RSSI/SNR/EVM aggregate for DEVOURER_RX_ENERGY_MS
+   * and the sweep's per-dwell frame stats (the frame-driven half of the energy
+   * telemetry). path-A chain; DEVOURER_RX_AGG_SA optionally restricts it to the
+   * sounding probe's SA. */
+  if ((g_rx_energy_ms > 0 || !g_rx_sweep.empty()) && agg_sa_match(packet)) {
+    std::lock_guard<std::mutex> lk(g_rxagg_mu);
+    g_rxagg.add(packet.RxAtrib.rssi[0], packet.RxAtrib.snr[0],
+                packet.RxAtrib.evm[0], packet.RxAtrib.ldpc != 0,
+                packet.RxAtrib.stbc != 0, packet.RxAtrib.crc_err,
+                packet.RxAtrib.icv_err);
+  }
+
+  /* rx.seq — the ground-truth per-frame delivery sequence for the RX-ring loss
+   * study. pctr is the u32 txdemo stamps at the QoS-Data body start (MPDU
+   * offset 26); tsfl is the chip RX timestamp; paggr/ppdu are the aggregate
+   * structure the host-vs-RF loss discriminator keys on (a host FIFO overflow
+   * drops a whole aggregate; an RF loss drops individual frames). The SA gate
+   * follows DEVOURER_RX_AGG_SA when set, else the canonical txdemo SA. */
+  if (g_rx_pctr && packet.Data.size() >= 30) {
+    const bool seq_sa =
+        g_agg_sa_env
+            ? agg_sa_match(packet)
+            : (packet.Data.size() >= 16 &&
+               std::memcmp(packet.Data.data() + 10, kTxSa, 6) == 0);
+    if (seq_sa) {
+      uint32_t pctr;
+      std::memcpy(&pctr, packet.Data.data() + 26, 4);
+      devourer::Ev(*g_ev, "rx.seq")
+          .t() /* host monotonic ms — correlates a pctr gap with an rx.ring dip */
+          .f("pctr", (unsigned long long)pctr)
+          .f("tsfl", packet.RxAtrib.tsfl)
+          .f("seq", packet.RxAtrib.seq_num)
+          .f("crc", packet.RxAtrib.crc_err ? 1 : 0)
+          .f("paggr", packet.RxAtrib.paggr ? 1 : 0)
+          .f("ppdu", packet.RxAtrib.ppdu_cnt)
+          /* hw rate index of THIS copy — retransmissions of one pctr can air
+           * at different rates (the fw fallback ladder), and per-copy rate +
+           * tsfl order is how a witness reconstructs the ladder on air. */
+          .f("rate", packet.RxAtrib.data_rate);
+    }
+  }
+
+  /* DEVOURER_RX_CONTROL=1 — emit addressed BlockAck frames for
+   * air-side responder qualification. This is deliberately a narrow event,
+   * not DEVOURER_STREAM_OUT=1: the latter mirrors every data body and would
+   * make a saturated A-MPDU witness log unnecessarily huge. BlockAck control
+   * frames have FC subtype 0x94, RA at 4, TA at 10, BA control/start-sequence
+   * at 16/18 and the first 64 bitmap bits at 20. The CRC flag remains in
+   * the event so a harness can refuse corrupt control observations. */
+  static const bool rx_control =
+      std::getenv("DEVOURER_RX_CONTROL") != nullptr;
+  if (rx_control && packet.Data.size() >= 28 &&
+      (packet.Data[0] & 0xfcu) == 0x94u) {
+    const uint16_t ba_ctrl = static_cast<uint16_t>(packet.Data[16]) |
+                             (static_cast<uint16_t>(packet.Data[17]) << 8);
+    const uint16_t start_seq = static_cast<uint16_t>(packet.Data[18]) |
+                               (static_cast<uint16_t>(packet.Data[19]) << 8);
+    devourer::Ev(*g_ev, "rx.blockack")
+        .f("crc", packet.RxAtrib.crc_err ? 1 : 0)
+        .f("rate", packet.RxAtrib.data_rate)
+        .f("ctrl", ba_ctrl)
+        .f("start_seq", start_seq)
+        .hex("ra", packet.Data.data() + 4, 6)
+        .hex("ta", packet.Data.data() + 10, 6)
+        .hex("bitmap", packet.Data.data() + 20, 8);
+  }
+
+  if (g_rx_count == 1) {
+    devourer::Ev(*g_ev, "init.timing")
+        .f("stage", "demo.first_rx_frame")
+        .f("ms", ms_since_start());
+  }
+
+  if (g_rx_count <= 10 || g_rx_count % 100 == 0) {
+    devourer::Ev(*g_ev, "rx.pkt")
+        .f("n", g_rx_count)
+        .f("len", packet.Data.size())
+        .f("rate", packet.RxAtrib.data_rate)
+        .f("rssi", packet.RxAtrib.rssi[0]);
+  }
+  /* DEVOURER_RX_DUMP_ALL=1: emit an `rx.corrupt` event for EVERY frame
+   * regardless of SA, with chip-flag bits and phy-soft metrics.
+   * Consumed by tools/precoder/corruption_survey.py for the FEC-design
+   * corruption-pattern survey. Pairs with DEVOURER_RX_KEEP_CORRUPTED to
+   * also pass through chip-FCS-error frames. The body is omitted from this
+   * event by design (a hot survey would inflate the log past usable size);
+   * pkt_len + the chip flags + phy metrics is what aggregates carry. */
+  static const bool dump_all = std::getenv("DEVOURER_RX_DUMP_ALL") != nullptr;
+  if (dump_all) {
+    const int rssi[2] = {packet.RxAtrib.rssi[0], packet.RxAtrib.rssi[1]};
+    const int evm[2] = {packet.RxAtrib.evm[0], packet.RxAtrib.evm[1]};
+    const int snr[2] = {packet.RxAtrib.snr[0], packet.RxAtrib.snr[1]};
+    /* Frame-control word + addr2 lead byte: lets the survey classify frame
+     * types (beacon 0x80, ACK 0xd4, ...) without carrying whole bodies. */
+    const unsigned fc = packet.Data.size() >= 2
+                            ? (packet.Data[0] | (packet.Data[1] << 8))
+                            : 0;
+    devourer::Ev(*g_ev, "rx.corrupt")
+        .hexf("fc", fc, 4)
+        .f("len", packet.Data.size())
+        .f("crc", packet.RxAtrib.crc_err ? 1 : 0)
+        .f("icv", packet.RxAtrib.icv_err ? 1 : 0)
+        .f("rate", packet.RxAtrib.data_rate)
+        .f("bw", packet.RxAtrib.bw)
+        .f("stbc", packet.RxAtrib.stbc)
+        .f("ldpc", packet.RxAtrib.ldpc)
+        .f("sgi", packet.RxAtrib.sgi)
+        .arr("rssi", rssi, 2)
+        .arr("evm", evm, 2)
+        .arr("snr", snr, 2);
+  }
+  /* BF self-sounding report detector (DEVOURER_BF_DETECT_REPORT modes 1-4) —
+   * shared with txdemo's single-radio capture, see BfReportDetect.h. */
+  devourer::bf::detect_report(packet);
+
+  /* TX-validation hook: detect frames whose SA matches the txdemo's hardcoded
+   * injected beacon (57:42:75:05:d6:00). When running this RX demo against
+   * one adapter while txdemo runs against another on the same
+   * channel, each hit confirms an injected frame made it over the air. */
+  if (packet.Data.size() >= 16) {
+    const bool sa_canon =
+        std::memcmp(packet.Data.data() + 10, kTxSa, 6) == 0;
+    /* DEVOURER_STREAM_OUT=1: print every stream-SA frame's body (uncapped)
+     * for the stream RX driver (tools/precoder/stream_rx.py) to decode. Tag
+     * is distinct so the regular dump_body capture stays uncluttered. The
+     * stream's SA gate follows DEVOURER_RX_AGG_SA when set — an oracle
+     * watching a foreign transmitter (e.g. a kernel-driver DUT's own MAC)
+     * selects it there — and stays canonical-SA-only when unset. */
+    static const bool stream_out =
+        std::getenv("DEVOURER_STREAM_OUT") != nullptr;
+    const bool stream_sa = g_agg_sa_env ? agg_sa_match(packet) : sa_canon;
+    /* DEVOURER_RX_KEEP_CORRUPTED=1: surface the body even when the chip
+     * flagged CRC/ICV error. Default is to filter them out for the byte-
+     * stream consumer (stream_rx.py), since a body with a wrong tail is
+     * the byte-mode parser's worst-case input. The flag is the entry
+     * point for the corruption_analysis.py tool — by-design opt-in so
+     * accidental enablement doesn't cause IP-stack misery. */
+    static const bool keep_corrupted =
+        std::getenv("DEVOURER_RX_KEEP_CORRUPTED") != nullptr;
+    const bool corrupted = packet.RxAtrib.crc_err || packet.RxAtrib.icv_err;
+    if (sa_canon) {
+      static int hits = 0;
+      ++hits;
+      if (hits <= 10 || hits % 100 == 0) {
+        /* rate/bw/ldpc/stbc mirror the rx.frame fields: for encoding-matrix
+         * runs the txhit event alone must prove what encoding was decoded
+         * (a pass with ldpc=0 means the TX fell back to BCC, not that the
+         * RX decoded LDPC). */
+        devourer::Ev(*g_ev, "rx.txhit")
+            .f("hits", hits)
+            .f("total_rx", g_rx_count)
+            .f("len", packet.Data.size())
+            .f("seq", packet.RxAtrib.seq_num)
+            .f("paggr", packet.RxAtrib.paggr ? 1 : 0)
+            .f("ppdu", packet.RxAtrib.ppdu_cnt)
+            .f("crc", packet.RxAtrib.crc_err ? 1 : 0)
+            .f("icv", packet.RxAtrib.icv_err ? 1 : 0)
+            .f("rate", packet.RxAtrib.data_rate)
+            .f("bw", packet.RxAtrib.bw)
+            .f("stbc", packet.RxAtrib.stbc)
+            .f("ldpc", packet.RxAtrib.ldpc)
+            .f("rssi", packet.RxAtrib.rssi[0])
+            /* AX PPDU-format nibble (Kestrel; 255 = pre-AX no field): 7=HE_SU
+             * 8=HE_ERSU — the on-air proof of an ER SU TX. */
+            .f("ppdu_type", packet.RxAtrib.ppdu_type);
+      }
+#if defined(DEVOURER_HAVE_JAGUAR1)
+      /* F2: BB-dbgport sweep on the first kCsiMaxFrames canonical-SA frames.
+       * Jaguar1-only (RtlJaguarDevice); g_rtl_device is null on Jaguar3. */
+      if (!g_csi_selectors.empty() && g_rtl_device != nullptr &&
+          hits <= kCsiMaxFrames && !g_rtl_device->bb_dbgport_wedged()) {
+        for (uint32_t sel : g_csi_selectors) {
+          uint32_t v = g_rtl_device->read_bb_dbgport(sel);
+          if (g_rtl_device->bb_dbgport_wedged()) {
+            /* reader refuses further writes; recover with
+             * libusb_reset_device / usbreset */
+            devourer::Ev(*g_ev, "csi.wedged").hexf("selector", sel, 8);
+            break;
+          }
+          devourer::Ev(*g_ev, "csi.hit")
+              .f("hit", hits)
+              .hexf("selector", sel, 8)
+              .hexf("value", v, 8);
+        }
+      }
+#endif
+      /* DEVOURER_DUMP_SCRAMBLER=1: print the descrambler seed the chip
+       * recovered from this frame's SERVICE field. Consumed by
+       * tools/precoder/seed_probe.py --mode rx to learn the seed a precoder TX
+       * chip uses. CAVEAT: the seed is only trustworthy when *this* RX adapter
+       * is an RTL8814AU — the 8812/8821 RX descriptor doesn't expose it there
+       * (see FrameParser.cpp). On 8812/8821 prefer seed_probe.py --mode
+       * bruteforce. Gated + SA-filtered so it doesn't flood. */
+      static const bool dump_scrambler =
+          std::getenv("DEVOURER_DUMP_SCRAMBLER") != nullptr;
+      if (dump_scrambler && (hits <= 20 || hits % 100 == 0)) {
+        devourer::Ev(*g_ev, "rx.scrambler")
+            .hexf("seed", packet.RxAtrib.scrambler, 2)
+            .f("rate", packet.RxAtrib.data_rate)
+            .f("hits", hits)
+            .f("len", packet.Data.size());
+      }
+      /* DEVOURER_DUMP_BODY=1: print the RX rate index (DESC_RATE*: 0x04=6M
+       * OFDM, 0x00=1M CCK, 0x0c+=HT/VHT MCS) and the 802.11 frame body
+       * (everything after the 24-byte mgmt header) as hex. Consumed by
+       * tests/precoder_roundtrip.py to confirm a precoder frame flew as
+       * 6M OFDM and that its shaped PSDU bytes round-tripped intact — the
+       * two-adapter, no-SDR verification. First few hits only. */
+      static const bool dump_body = std::getenv("DEVOURER_DUMP_BODY") != nullptr;
+      /* DEVOURER_RX_ALLPATHS=1: emit all four RX chains (A,B,C,D) of per-stream
+       * RSSI / SNR / EVM on a distinct `rx.path` event. Opt-in and separate so
+       * the canonical two-path `rx.frame`/`rx.body` events stay untouched.
+       * Populated on every generation (Kestrel from its halbb physts path
+       * pages); paths C/D are non-zero only on the 8814AU (4T4R) — the other
+       * dies are <=2 RX chains. Consumed by tests/antenna_decorrelation.py to measure
+       * inter-chain envelope correlation and realised diversity gain
+       * (spatial-diversity axis). */
+      static const bool rxpath_out =
+          std::getenv("DEVOURER_RX_ALLPATHS") != nullptr;
+      if (rxpath_out && (!corrupted || keep_corrupted)) {
+        const int rssi[4] = {packet.RxAtrib.rssi[0], packet.RxAtrib.rssi[1],
+                             packet.RxAtrib.rssi[2], packet.RxAtrib.rssi[3]};
+        const int snr[4] = {packet.RxAtrib.snr[0], packet.RxAtrib.snr[1],
+                            packet.RxAtrib.snr[2], packet.RxAtrib.snr[3]};
+        const int evm[4] = {packet.RxAtrib.evm[0], packet.RxAtrib.evm[1],
+                            packet.RxAtrib.evm[2], packet.RxAtrib.evm[3]};
+        devourer::Ev(*g_ev, "rx.path")
+            .f("seq", packet.RxAtrib.seq_num)
+            .arr("rssi", rssi, 4)
+            .arr("snr", snr, 4)
+            .arr("evm", evm, 4);
+      }
+      if (dump_body && hits <= 5) {
+        /* Tier-2 health diagnostics alongside the byte mirror: rate (0x04 =
+         * 6M OFDM), per-stream RSSI/EVM/SNR (link quality — content-blind),
+         * crc (always 0: CRC-failed frames are dropped upstream, so reaching
+         * here is itself the decode-sanity signal). Then the body hex. */
+        const int rssi[2] = {packet.RxAtrib.rssi[0], packet.RxAtrib.rssi[1]};
+        const int evm[2] = {packet.RxAtrib.evm[0], packet.RxAtrib.evm[1]};
+        const int snr[2] = {packet.RxAtrib.snr[0], packet.RxAtrib.snr[1]};
+        const size_t body_len =
+            packet.Data.size() > 24 ? packet.Data.size() - 24 : 0;
+        devourer::Ev(*g_ev, "rx.body")
+            .f("rate", packet.RxAtrib.data_rate)
+            .arr("rssi", rssi, 2)
+            .arr("evm", evm, 2)
+            .arr("snr", snr, 2)
+            .f("crc", packet.RxAtrib.crc_err ? 1 : 0)
+            .f("len", packet.Data.size())
+            .hex("body", packet.Data.data() + 24, body_len);
+      }
+    }
+    if (stream_out && stream_sa && (!corrupted || keep_corrupted)) {
+      /* Per-stream phy soft metrics (RSSI / EVM / SNR for paths A,B; on
+       * 8814AU paths C,D would also be non-zero but we surface only A,B
+       * here to stay aligned with rx.body's fields). These are
+       * link-quality measurements at the PHY before decoding — same
+       * source as the Tier-2 diagnostics — so a consumer like
+       * corruption_analysis.py can correlate BER with link quality on a
+       * per-frame basis instead of relying on aggregated statistics. */
+      /* seq + tsfl: chip-side sequence number (12-bit u16) and TSF low
+       * (full 32-bit u32). Consumers can dedup by seq and measure
+       * one-way latency by diffing TSF against the host clock. Optional
+       * fields — pre-#84 regex consumers tolerate them via the same
+       * pass-through pattern. */
+      /* Decoded PHY descriptor fields (bw/stbc/ldpc/sgi) alongside the rate
+       * index: these let an SDR-as-TX completeness harness assert that the
+       * frame devourer received carries the bandwidth / STBC / FEC / guard
+       * interval the transmitter encoded. Valid on 8812/8821; on 8814AU the
+       * RX descriptor doesn't expose these at this offset (FrameParser.cpp),
+       * so they read as the chip's defaults there. */
+      const int rssi[2] = {packet.RxAtrib.rssi[0], packet.RxAtrib.rssi[1]};
+      const int evm[2] = {packet.RxAtrib.evm[0], packet.RxAtrib.evm[1]};
+      const int snr[2] = {packet.RxAtrib.snr[0], packet.RxAtrib.snr[1]};
+      const size_t body_len =
+          packet.Data.size() > 24 ? packet.Data.size() - 24 : 0;
+      auto ev = devourer::Ev(*g_ev, "rx.frame");
+      ev.f("rate", packet.RxAtrib.data_rate)
+          .f("len", packet.Data.size())
+          .f("crc", packet.RxAtrib.crc_err ? 1 : 0)
+          .f("icv", packet.RxAtrib.icv_err ? 1 : 0)
+          .arr("rssi", rssi, 2)
+          .arr("evm", evm, 2)
+          .arr("snr", snr, 2)
+          .f("seq", packet.RxAtrib.seq_num)
+          .f("tsfl", packet.RxAtrib.tsfl)
+          .f("bw", packet.RxAtrib.bw)
+          .f("stbc", packet.RxAtrib.stbc)
+          .f("ldpc", packet.RxAtrib.ldpc)
+          .f("sgi", packet.RxAtrib.sgi)
+          /* A-MPDU RX markers (src/RxPacket.h): paggr = inside an
+           * aggregate; ppdu = the halmac 2-bit received-PPDU counter
+           * (frames sharing a value shared one PPDU). */
+          .f("paggr", packet.RxAtrib.paggr ? 1 : 0)
+          .f("ppdu", packet.RxAtrib.ppdu_cnt)
+          /* FC flags byte (frame byte 1): bit3 = the 802.11 RETRY flag —
+           * distinguishes hardware retransmissions (e.g. an A-MPDU
+           * re-aired for want of a BlockAck) from first airings. */
+          .f("fc1", packet.Data.size() > 1 ? packet.Data[1] : 0);
+      /* sa: the transmitter address the stream gate matched on — lets a
+       * multi-source consumer attribute frames when the gate is "any". */
+      ev.hex("sa", packet.Data.data() + 10, 6);
+      /* tx_tsf: the sender's hardware TX-egress TSF (beacons / probe responses
+       * only). Pair with tsfl — the local hardware RX timestamp above — for
+       * one-way hardware time sync with no host-clock jitter on either end. */
+      if (auto tx = packet.TxEgressTsf())
+        ev.f("tx_tsf", (unsigned long long)*tx);
+      ev.hex("body", packet.Data.data() + 24, body_len);
+    }
+  }
+}
+
+int main(int argc, char **argv) {
+  libusb_context *ctx;
+  int rc;
+
+  /* Termux/Android: argv[1] = numeric USB fd handed to us by the app that holds
+   * the USB-host permission (libusb can't enumerate /dev/bus/usb under an
+   * untrusted_app SELinux domain, so we wrap the pre-opened fd instead). Mirrors
+   * the TX demo. fd==0 -> normal VID/PID open on Linux/macOS. */
+  const long termux_fd = (argc >= 2) ? std::strtol(argv[1], nullptr, 0) : 0;
+  const bool termux_mode = (termux_fd > 0);
+
+  auto logger = std::make_shared<Logger>();
+  apply_logging_env(*logger); /* DEVOURER_LOG_LEVEL / DEVOURER_EVENTS / ... */
+  g_ev = &logger->events();
+  devourer::bf::bf_events = g_ev; /* BfReportDetect.h emissions */
+
+  /* SIGINT/SIGTERM -> clean shutdown (Stop() below). Without this the harness's
+   * `timeout` SIGTERM killed us mid-RX, leaving the chip's USB core hung. */
+  install_devourer_signal_handlers();
+
+  /* Owns the teardown order (device -> interface -> handle -> context; see
+   * DeviceSession.h). Declared before every thread below, so the threads are
+   * joined before the adapter is released. Each early return from here on
+   * unwinds whatever has been adopted so far. */
+  devourer::DeviceSession session{logger};
+
+#if defined(DEVOURER_HAVE_PCIE)
+  /* DEVOURER_PCIE_BDF=0000:01:00.0 — drive a PCIe adapter (RTL8821CE) through
+   * the vfio transport instead of libusb. The device must be bound to vfio-pci
+   * (tests/pcie_vfio_bind.sh). Minimal RX flow: transport -> factory -> Init;
+   * the USB-side pollers/sweep extras are not wired on this branch (yet). */
+  if (const char *bdf = std::getenv("DEVOURER_PCIE_BDF")) {
+    devourer::PcieTransport::Config pcfg;
+    if (const char *pp = std::getenv("DEVOURER_PCIE_RX_POLL_US"))
+      pcfg.rx_poll_us = std::atoi(pp);
+    /* DEVOURER_PCIE_NO_MSI=1 — force the fixed-interval polled RX loop
+     * (A/B escape hatch; MSI+eventfd is the default). */
+    if (std::getenv("DEVOURER_PCIE_NO_MSI"))
+      pcfg.use_msi = false;
+    auto transport = devourer::PcieTransport::Open(bdf, logger, pcfg);
+    if (!transport)
+      return 1;
+    devourer::Ev(*g_ev, "init.timing")
+        .f("stage", "demo.open_device")
+        .f("ms", ms_since_start());
+    WiFiDriver wifi_driver(logger);
+    auto owned_device = wifi_driver.CreateRadioPcie(
+        std::move(transport), devourer_config_from_env());
+    if (!owned_device) {
+      logger->error("No driver for this PCIe chip in this build — exiting");
+      return 1;
+    }
+    /* The session owns the device from here: it is what guarantees the device
+     * (and its in-flight TX) dies before the transport behind it. */
+    session.adopt_device(std::move(owned_device));
+    IRadio *const dev = session.device();
+    devourer::Ev(*g_ev, "init.timing")
+        .f("stage", "demo.create_device")
+        .f("ms", ms_since_start());
+    devourer::emit_adapter_caps(*g_ev, dev);
+    int pch = 36;
+    if (const char *ch_env = std::getenv("DEVOURER_CHANNEL"))
+      pch = std::atoi(ch_env);
+    ChannelWidth_t pwidth = CHANNEL_WIDTH_20;
+    uint8_t poff = 0;
+    if (const char *bw_env = std::getenv("DEVOURER_BW")) {
+      int bw = std::atoi(bw_env);
+      if (bw == 40 || bw == 80 || bw == 160) {
+        pwidth = bw == 40 ? CHANNEL_WIDTH_40 : bw == 80 ? CHANNEL_WIDTH_80 : CHANNEL_WIDTH_160;
+        poff = 1;
+        if (const char *off_env = std::getenv("DEVOURER_CHOFFSET"))
+          poff = static_cast<uint8_t>(std::atoi(off_env));
+      }
+    }
+    logger->info("PCIe RX: {} ch={} bw={}", bdf, pch, (int)pwidth);
+    /* DEVOURER_LA_CAPTURE rides the same worker-thread pattern as the USB
+     * default path — the LA module is bus-neutral (RtlAdapter). */
+    std::thread pcie_la_thread;
+    if (g_la_spec && *g_la_spec) {
+      devourer::LaParams la_params;
+      la_params.max_samples = g_la_max;
+      if (!parse_la_spec(g_la_spec, la_params)) {
+        logger->error("DEVOURER_LA_CAPTURE: bad spec '{}'", g_la_spec);
+        return 1;
+      }
+      auto runner = la_runner_for(dev);
+      if (!runner) {
+        logger->error("DEVOURER_LA_CAPTURE: no LA support wired for this "
+                      "generation yet");
+        return 1;
+      }
+      logger->info("DEVOURER_LA_CAPTURE='{}' — one-shot capture after RX is "
+                   "live (+{} ms settle) -> {}", g_la_spec, g_la_delay_ms,
+                   g_la_out);
+      pcie_la_thread = std::thread([runner, la_params]() {
+        for (int w = 0; w < 10000 && !g_devourer_should_stop && g_rx_count == 0;
+             w += 50)
+          std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        for (uint32_t s = 0; s < g_la_delay_ms && !g_devourer_should_stop;
+             s += 50)
+          std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        if (g_devourer_should_stop)
+          return;
+        run_la_capture(runner, la_params);
+      });
+    }
+    try {
+      dev->Init(packetProcessor,
+                SelectedChannel{.Channel = static_cast<uint8_t>(pch),
+                                .ChannelOffset = poff,
+                                .ChannelWidth = pwidth});
+    } catch (const std::exception &e) {
+      logger->error("PCIe bring-up failed: {}", e.what());
+      if (pcie_la_thread.joinable())
+        pcie_la_thread.join();
+      return 1;
+    }
+    if (pcie_la_thread.joinable())
+      pcie_la_thread.join();
+    dev->Stop();
+    return 0;
+  }
+#endif /* DEVOURER_HAVE_PCIE */
+
+  if (termux_mode) {
+    logger->info("Termux/Android mode: wrapping USB fd {}", termux_fd);
+    /* Both options are global (ctx==NULL) and must precede libusb_init: skip the
+     * device-discovery scan entirely, and take the weak-authority path that
+     * tolerates the app-sandboxed usbfs fd. */
+    libusb_set_option(NULL, LIBUSB_OPTION_NO_DEVICE_DISCOVERY);
+    libusb_set_option(NULL, LIBUSB_OPTION_WEAK_AUTHORITY);
+  }
+
+  rc = libusb_init(&ctx);
+  if (rc < 0) {
+    return rc;
+  }
+  session.adopt_context(ctx);
+
+  /* libusb log level: WARNING by default. DEBUG is opt-in via
+   * DEVOURER_USB_DEBUG=1 — it emits ~7 MB per 15s run (has filled /tmp and
+   * wedged the harness), and bench_init.py measured it adding 0.5-0.8s to
+   * time-to-first-RX-frame even with stderr discarded; on a slow sink
+   * (SSH/serial/embedded flash) the cost is unbounded. DEVOURER_USB_QUIET
+   * is accepted as a no-op for backwards compatibility with older scripts. */
+  libusb_set_option(ctx, LIBUSB_OPTION_LOG_LEVEL,
+                    std::getenv("DEVOURER_USB_DEBUG")
+                        ? LIBUSB_LOG_LEVEL_DEBUG
+                        : LIBUSB_LOG_LEVEL_WARNING);
+
+  libusb_device_handle *dev_handle = nullptr;
+  if (termux_mode) {
+    rc = libusb_wrap_sys_device(ctx, (intptr_t)termux_fd, &dev_handle);
+    if (rc != 0 || dev_handle == nullptr) {
+      logger->error("libusb_wrap_sys_device(fd={}) failed: {} ({})", termux_fd,
+                    libusb_error_name(rc), rc);
+      return 1;
+    }
+  } else {
+    /* DEVOURER_PID / DEVOURER_VID / DEVOURER_USB_BUS / DEVOURER_USB_PORT device
+     * selection — shared with the other multi-adapter demos (usb_select.h). */
+    dev_handle = open_selected_usb(
+        ctx, logger, kRealtekProductIds,
+        sizeof(kRealtekProductIds) / sizeof(kRealtekProductIds[0]));
+  }
+  if (dev_handle == NULL) {
+    return 1;
+  }
+
+  devourer::Ev(*g_ev, "init.timing")
+      .f("stage", "demo.open_device")
+      .f("ms", ms_since_start());
+  /* Claim-before-reset: the kernel's exclusive interface claim is the primary
+   * guard against a second devourer driving this adapter — it returns BUSY, and
+   * bailing on BUSY *before* the reset keeps a second launch from re-enumerating
+   * the adapter out from under the process that already owns it. DEVOURER_SKIP_RESET
+   * still suppresses the reset for a warm pickup (firmware already running).
+   * See src/UsbOpen.h. */
+  std::shared_ptr<devourer::UsbDeviceLock> usb_lock;
+  /* Reopen variant: recovers in place when the reset re-enumerates the device
+   * (a warm Kestrel drops its firmware back to ROM on reset — the handle goes
+   * stale and the dongle may pass through its ZeroCD id before returning). */
+  /* Reset skipped in termux_mode: a wrapped app-owned fd can't be re-enumerated
+   * (a USB reset would orphan the handle the device-list scan can't re-find). */
+  rc = devourer::claim_interface_reset_reopen(ctx, dev_handle, logger,
+      !termux_mode && std::getenv("DEVOURER_SKIP_RESET") == nullptr, usb_lock);
+  devourer::Ev(*g_ev, "init.timing")
+      .f("stage", "demo.usb_reset")
+      .f("ms", ms_since_start());
+  if (rc != 0) {
+    /* BUSY => another process owns the adapter; any other error => open failed.
+     * Either way, exit cleanly rather than asserting. The claim failed, so
+     * nothing owns the handle yet — hand it to the session purely so the
+     * unwind closes it. */
+    session.adopt_handle(dev_handle);
+    return 1;
+  }
+  session.adopt_handle(dev_handle);
+  session.adopt_lock(usb_lock);
+
+  WiFiDriver wifi_driver(logger);
+  auto owned_device = wifi_driver.CreateRadio(dev_handle, ctx, usb_lock,
+                                                  devourer_config_from_env());
+  if (!owned_device) {
+    /* The factory returns null when the plugged chip's generation wasn't
+     * compiled in (per-chip CMake options); it already logged which. */
+    logger->error("No driver for this chip in this build — exiting");
+    return 1;
+  }
+  /* The session owns the device from here: it is what guarantees the device
+   * (and its in-flight TX) dies before libusb does. */
+  session.adopt_device(std::move(owned_device));
+  IRadio *const rtlDevice = session.device();
+  devourer::Ev(*g_ev, "init.timing")
+      .f("stage", "demo.create_device")
+      .f("ms", ms_since_start());
+  devourer::emit_adapter_caps(*g_ev, rtlDevice);
+  /* Backend-scoped measurement hook. Scheduling belongs to each measured
+   * concrete backend so the delay starts after its arm/bring-up rather than
+   * racing Init from a generic side thread. Refuse unmeasured paths: a green
+   * run that cleared a cold port before Init armed it is false evidence. */
+  if (const char *d = std::getenv("DEVOURER_ACK_DISARM_AFTER_MS")) {
+    const char *responder = std::getenv("DEVOURER_ACK_RESPONDER");
+    if (responder == nullptr) {
+      logger->warn("DEVOURER_ACK_DISARM_AFTER_MS ignored: no "
+                   "DEVOURER_ACK_RESPONDER was configured");
+    } else if (!devourer::parse_mac(responder)) {
+      logger->error("DEVOURER_ACK_DISARM_AFTER_MS requires a valid "
+                    "DEVOURER_ACK_RESPONDER MAC");
+      return 1;
+    } else {
+      char *end = nullptr;
+      errno = 0;
+      const unsigned long long ms = std::strtoull(d, &end, 10);
+      if (errno != 0 || end == d || *end != '\0' || d[0] == '-' ||
+          ms > (std::numeric_limits<uint32_t>::max)()) {
+        logger->error("DEVOURER_ACK_DISARM_AFTER_MS='{}' is not a valid "
+                      "non-negative 32-bit millisecond delay",
+                      d);
+        return 1;
+      }
+      bool scheduled = false;
+#if defined(DEVOURER_HAVE_JAGUAR1)
+      if (auto *jaguar1 = dynamic_cast<RtlJaguarDevice *>(rtlDevice))
+        scheduled = jaguar1->ScheduleAckResponderDisarmForTest(
+            static_cast<uint32_t>(ms));
+#endif
+#if defined(DEVOURER_HAVE_8733B)
+      if (auto *rtl8733b = dynamic_cast<Rtl8733bDevice *>(rtlDevice)) {
+        rtl8733b->ScheduleAckResponderDisarmForTest(
+            static_cast<uint32_t>(ms));
+        scheduled = true;
+      }
+#endif
+      if (!scheduled) {
+        logger->error(
+            "DEVOURER_ACK_DISARM_AFTER_MS is supported only by RTL8733B "
+            "and the Jaguar1/CHIP_8812 path (measured on RTL8812AU); "
+            "refusing {}",
+            devourer::generation_name(
+                rtlDevice->GetAdapterCaps().generation));
+        return 1;
+      }
+    }
+  }
+  /* The BB-debug-port / queue-depth research helpers are Jaguar1-only, so
+   * they live on RtlJaguarDevice rather than the IRadio interface. The
+   * whole block compiles out when Jaguar1 support isn't built; when it is, the
+   * dynamic_cast yields nullptr for a Jaguar3 device, disabling them cleanly. */
+#if defined(DEVOURER_HAVE_JAGUAR1)
+  g_rtl_device = dynamic_cast<RtlJaguarDevice *>(rtlDevice);
+  std::atomic<bool> qd_emitter_stop{false};
+  std::thread qd_emitter;
+  if (g_qd_poll_ms > 0 && g_rtl_device != nullptr) {
+    logger->info("DEVOURER_QUEUE_POLL_MS={} — starting queue-depth poller",
+                 g_qd_poll_ms);
+    g_rtl_device->start_queue_depth_poller(g_qd_poll_ms);
+    /* Self-driven emitter — ticks at the poll cadence so the queue snapshot
+     * surfaces even when the RX hook is sparse (e.g. broken-RX 8814 cells).
+     * Idempotent w.r.t. the poller; just reads the atomic snapshot. */
+    qd_emitter = std::thread([&qd_emitter_stop]() {
+      while (!qd_emitter_stop.load()) {
+        if (g_rtl_device != nullptr) {
+          auto q = g_rtl_device->get_queue_depth();
+          devourer::Ev(*g_ev, "tx.queue")
+              .hexf("q1", q[0], 8)
+              .hexf("q2", q[1], 8)
+              .hexf("q3", q[2], 8)
+              .hexf("q4", q[3], 8)
+              .hexf("q5", q[4], 8);
+        }
+        for (uint32_t slept = 0; slept < g_qd_poll_ms && !qd_emitter_stop.load();
+             slept += 50) {
+          std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        }
+      }
+    });
+  }
+#endif /* DEVOURER_HAVE_JAGUAR1 */
+
+  /* Cross-generation thermal telemetry. GetThermalStatus is part of IRadio
+   * (Jaguar1/2/3, Kestrel, and RTL8733B); using the base pointer is what makes
+   * DEVOURER_THERMAL_POLL_MS work on RTL8812EU and newer backends instead of
+   * silently becoming Jaguar1-only. Emit + warn only — see the knob's comment
+   * above for why the reading never gates the session. */
+  std::atomic<bool> therm_emitter_stop{false};
+  std::thread therm_emitter;
+  if (g_thermal_poll_ms > 0) {
+    logger->info("DEVOURER_THERMAL_POLL_MS={} warn_delta={} — starting thermal "
+                 "poller", g_thermal_poll_ms, g_thermal_warn_delta);
+    IRadio *dev = rtlDevice;
+    therm_emitter = std::thread([&therm_emitter_stop, dev, logger]() {
+      bool warned = false;
+      while (!therm_emitter_stop.load()) {
+        for (uint32_t slept = 0;
+             slept < g_thermal_poll_ms && !therm_emitter_stop.load();
+             slept += 50)
+          std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        if (therm_emitter_stop.load())
+          break;
+        const auto t = dev->GetThermalStatus();
+        if (t.raw == 0 && !t.valid)
+          continue; // backend not initialized yet, or no live meter
+        devourer::Ev ev(*g_ev, "thermal");
+        ev.t().f("raw", t.raw);
+        if (t.valid)
+          ev.f("baseline", t.baseline).f("delta", t.delta);
+        else
+          ev.f("baseline", nullptr);
+        ev.f("status", ThermalBucket(t));
+        if (t.valid && t.delta >= g_thermal_warn_delta && !warned) {
+          logger->warn("thermal: raw={} baseline={} delta={} status={}", t.raw,
+                       t.baseline, t.delta, ThermalBucket(t));
+          warned = true;
+        } else if (!t.valid || t.delta < g_thermal_warn_delta) {
+          warned = false;
+        }
+      }
+    });
+  }
+
+  /* DEVOURER_RX_ENERGY_MS: frame-free RX energy / channel-busy telemetry — the
+   * read side of DEVOURER_CW_TONE. Cross-generation (IRtlRadio::GetRxEnergy),
+   * so it runs off the IRtlRadio cast, not the Jaguar1 downcast. The thread
+   * sleeps one interval first (so its first read lands after bring-up completes,
+   * not mid-init), then each interval reads GetRxEnergy() + drains the rolling
+   * frame aggregate and emits one rx.energy event. Concurrency caveat:
+   * the FA/CCA reads share libusb with the RX bulk loop (like the thermal
+   * poller) — keep the cadence conservative (>= a few hundred ms). */
+  std::atomic<bool> energy_emitter_stop{false};
+  std::thread energy_emitter;
+  IRtlRadio *const energy_dev = dynamic_cast<IRtlRadio *>(rtlDevice);
+  if (g_rx_energy_ms > 0 && !energy_dev)
+    logger->warn("DEVOURER_RX_ENERGY_MS: frame-free energy is Realtek-only "
+                 "(IRtlRadio) — telemetry not started on this radio");
+  if (g_rx_energy_ms > 0 && energy_dev) {
+    logger->info("DEVOURER_RX_ENERGY_MS={} — starting RX energy telemetry",
+                 g_rx_energy_ms);
+    IRtlRadio *dev = energy_dev;
+    energy_emitter = std::thread([&energy_emitter_stop, dev]() {
+      auto nap = [&](uint32_t ms) {
+        for (uint32_t s = 0; s < ms && !energy_emitter_stop.load(); s += 50)
+          std::this_thread::sleep_for(std::chrono::milliseconds(50));
+      };
+      nap(g_rx_energy_ms); /* let bring-up finish before the first read */
+      while (!energy_emitter_stop.load()) {
+        RxEnergy e = dev->GetRxEnergy(true);
+        RxAgg agg;
+        {
+          std::lock_guard<std::mutex> lk(g_rxagg_mu);
+          agg = g_rxagg;
+          g_rxagg = RxAgg{};
+        }
+        int rssi_mean = agg.n ? agg.rssi_sum / static_cast<int>(agg.n) : 0;
+        int snr_mean = agg.n ? agg.snr_sum / static_cast<int>(agg.n) : 0;
+        int evm_mean =
+            agg.evm_n ? agg.evm_sum / static_cast<int>(agg.evm_n) : 0;
+        {
+          /* chip-counter fields go null when the chip doesn't expose them */
+          devourer::Ev ev(*g_ev, "rx.energy");
+          ev.t();
+          if (e.valid_fa)
+            ev.f("cca_ofdm", e.cca_ofdm)
+                .f("cca_cck", e.cca_cck)
+                .f("fa_ofdm", e.fa_ofdm)
+                .f("fa_cck", e.fa_cck);
+          else
+            ev.f("cca_ofdm", nullptr)
+                .f("cca_cck", nullptr)
+                .f("fa_ofdm", nullptr)
+                .f("fa_cck", nullptr);
+          if (e.valid_igi)
+            ev.f("igi", e.igi);
+          else
+            ev.f("igi", nullptr);
+          if (e.valid_noise_floor) /* active absolute floor (opt-in) */
+            ev.f("abs_noise_floor_dbm", e.abs_noise_floor_dbm);
+          else
+            ev.f("abs_noise_floor_dbm", nullptr);
+          emit_ccx(ev, e);
+          ev.f("frames", agg.n)
+              .f("frames_ldpc", agg.n_ldpc)
+              .f("frames_stbc", agg.n_stbc)
+              .f("crc_err", agg.n_crc)
+              .f("icv_err", agg.n_icv)
+              .f("rssi_mean", rssi_mean)
+              .f("rssi_max", agg.n ? agg.rssi_max : 0)
+              .f("snr_mean", snr_mean)
+              .f("snr_min", agg.n ? agg.snr_min : 0)
+              .f("evm_mean", evm_mean);
+        }
+        emit_nhm(e, -1);
+        /* DEVOURER_LINKHEALTH=1 — classify the window into a plain-language
+         * verdict + fix (src/LinkHealth.h). Rides the energy cadence and the
+         * same sensor snapshot; the whole point is to tell a near-field
+         * saturation problem (strong RSSI, dirty EVM — back OFF power) apart
+         * from a weak link (add power) so a user isn't chasing the wrong
+         * remedy. IGI rails passed as the union J1/J2 floor (the saturation
+         * corroborator); J3 has no DIG so its IGI is a static hint only. */
+        if (g_linkhealth) {
+          devourer::LinkHealthInput in;
+          in.frames = agg.n;
+          /* Strength = window PEAK (near-field saturation drags the mean down;
+           * see LinkHealth.h). */
+          in.rssi_raw = agg.n ? agg.rssi_max : 0;
+          in.snr_raw = snr_mean;
+          in.evm_raw = evm_mean;
+          in.evm_valid = agg.evm_n > 0;
+          in.energy_valid = e.valid_fa;
+          in.fa_ofdm = e.fa_ofdm;
+          in.cca_ofdm = e.cca_ofdm;
+          in.igi_valid = e.valid_igi;
+          in.igi = e.igi;
+          in.igi_min = 0x1c; /* J1/J2 DIG floor — the saturation hint */
+          in.igi_max = 0x7f; /* J3 ceiling — never a false 'weak' rail */
+          devourer::LinkHealthVerdict h = devourer::classify_link_health(in);
+          devourer::Ev ev(*g_ev, "link.health");
+          ev.f("verdict", h.label)
+              .f("rssi_dbm", h.rssi_dbm)
+              .f("snr_db", h.snr_db);
+          if (in.evm_valid)
+            ev.f("evm_db", h.evm_db);
+          else
+            ev.f("evm_db", nullptr);
+          ev.f("frames", agg.n);
+          if (e.valid_fa)
+            ev.f("fa_ofdm", e.fa_ofdm);
+          else
+            ev.f("fa_ofdm", nullptr);
+          if (e.valid_igi)
+            ev.f("igi", e.igi);
+          else
+            ev.f("igi", nullptr);
+          if (h.igi_at_floor)
+            ev.f("igi_floor", 1);
+          if (h.igi_at_ceiling)
+            ev.f("igi_ceil", 1);
+          ev.f("cause", h.cause).f("fix", h.fix);
+        }
+        /* DEVOURER_RXQUALITY=1 — dogfood the library GetRxQuality() feed: the
+         * same window a linked controller (fluke_gs) would read, incl. the
+         * passive noise-floor. NB it drains the device-internal accumulator +
+         * calls GetRxEnergy itself, so its counters are independent of the
+         * rx.energy/link.health events above (which use the
+         * demo's own g_rxagg). */
+        if (g_rxquality) {
+          devourer::RxQuality q = dev->GetRxQuality();
+          devourer::Ev ev(*g_ev, "rx.quality");
+          ev.f("verdict", q.label)
+              .f("frames", q.frames)
+              .f("rssi_mean_dbm", q.rssi_mean_dbm)
+              .f("rssi_max_dbm", q.rssi_max_dbm)
+              .f("snr_mean_db", q.snr_mean_db)
+              .f("snr_min_db", q.snr_min_db);
+          if (q.evm_valid)
+            ev.f("evm_db", q.evm_mean_db);
+          else
+            ev.f("evm_db", nullptr);
+          if (q.nf_valid)
+            ev.f("noise_floor_dbm", q.noise_floor_dbm);
+          else
+            ev.f("noise_floor_dbm", nullptr);
+          /* Active/frame-free absolute floor (DEVOURER_RX_NOISE_FLOOR): the
+           * companion to the passive floor above. Null unless opted-in AND the
+           * generation supports it (Jaguar2 live / Jaguar1 8812A CAL). */
+          if (q.abs_nf_valid)
+            ev.f("abs_noise_floor_dbm", q.abs_noise_floor_dbm);
+          else
+            ev.f("abs_noise_floor_dbm", nullptr);
+          ev.f("igi", q.igi_valid ? q.igi : -1);
+
+          /* Live per-chain RX-path activity (GetActiveRxPaths) — which
+           * antennas actually carry signal, vs the static rx_chains the caps
+           * report. Rides the same dogfood knob + cadence; only meaningful on
+           * a >=2-chain part with ambient traffic. */
+          devourer::ActiveRxPaths ap = dev->GetActiveRxPaths();
+          if (ap.valid) {
+            devourer::Ev pev(*g_ev, "adapter.rxpaths");
+            pev.hexf("active_mask", ap.active_mask, 2)
+                .f("n_active", ap.n_active)
+                .f("n_chains", ap.n_chains)
+                .f("frames", ap.frames)
+                .arr("rssi_dbm", ap.rssi_mean_dbm, ap.n_chains);
+            /* Per-chain window-mean SNR / EVM (dB) — present only when at
+             * least one chain carried the metric this window (a CCK-only
+             * stream carries neither). Unsampled chains read 0. */
+            bool any_snr = false, any_evm = false;
+            for (uint8_t i = 0; i < ap.n_chains; i++) {
+              any_snr = any_snr || ap.snr_sampled[i];
+              any_evm = any_evm || ap.evm_sampled[i];
+            }
+            if (any_snr)
+              pev.arr("snr_db", ap.snr_mean_db, ap.n_chains);
+            if (any_evm)
+              pev.arr("evm_db", ap.evm_mean_db, ap.n_chains);
+          }
+        }
+        nap(g_rx_energy_ms);
+      }
+    });
+  }
+
+  /* Every path below may have one or more background register readers alive.
+   * Stop them before DeviceSession tears down the device/USB transport, and do
+   * the same on exceptions: a joinable std::thread destructor terminates the
+   * process instead of unwinding safely. */
+  ScopeExit stop_background_emitters([&]() {
+    therm_emitter_stop = true;
+#if defined(DEVOURER_HAVE_JAGUAR1)
+    qd_emitter_stop = true;
+#endif
+    energy_emitter_stop = true;
+    if (therm_emitter.joinable())
+      therm_emitter.join();
+#if defined(DEVOURER_HAVE_JAGUAR1)
+    if (qd_emitter.joinable())
+      qd_emitter.join();
+#endif
+    if (energy_emitter.joinable())
+      energy_emitter.join();
+  });
+
+  /* Default channel 36 (5 GHz) for the 8812 reference. Override with
+   * DEVOURER_CHANNEL=N env var (e.g. DEVOURER_CHANNEL=6 for busy 2.4 GHz). */
+  int channel = 36;
+  if (const char *ch_env = std::getenv("DEVOURER_CHANNEL")) {
+    channel = std::atoi(ch_env);
+    logger->info("DEVOURER_CHANNEL set — tuning to channel {}", channel);
+  }
+  /* RX bandwidth: 20 MHz by default. DEVOURER_BW=40|80 selects a wide monitor
+   * channel (for receiving HT40 / VHT80 frames); DEVOURER_CHOFFSET picks the
+   * secondary half (1 = secondary above the primary, 2 = secondary below).
+   * DEVOURER_NB_BW=5|10 re-clocks the baseband to narrowband (Jaguar2/3;
+   * check the adapter.caps narrowband_ok flag). */
+  ChannelWidth_t width = CHANNEL_WIDTH_20;
+  uint8_t ch_offset = 0;
+  if (const char *bw_env = std::getenv("DEVOURER_BW")) {
+    int bw = std::atoi(bw_env);
+    if (bw == 40 || bw == 80 || bw == 160) {
+      width = bw == 40 ? CHANNEL_WIDTH_40 : bw == 80 ? CHANNEL_WIDTH_80 : CHANNEL_WIDTH_160;
+      ch_offset = 1; // default: secondary channel above the primary
+      if (const char *off_env = std::getenv("DEVOURER_CHOFFSET"))
+        ch_offset = static_cast<uint8_t>(std::atoi(off_env));
+      logger->info("DEVOURER_BW={} — {} MHz RX, channel-offset {}", bw, bw,
+                   ch_offset);
+    }
+  }
+  if (const char *nb = std::getenv("DEVOURER_NB_BW")) {
+    int mhz = std::atoi(nb);
+    if (mhz == 5)
+      width = CHANNEL_WIDTH_5;
+    else if (mhz == 10)
+      width = CHANNEL_WIDTH_10;
+    logger->info("DEVOURER_NB_BW={} — RX bandwidth {} MHz", nb, mhz);
+  }
+
+  const auto hop_rx_channels =
+      devourer::parse_sweep_spec(std::getenv("DEVOURER_HOP_CHANNELS"));
+  long hop_rx_slot_ms = 0;
+  if (const char *s = std::getenv("DEVOURER_HOP_SLOT_MS"))
+    hop_rx_slot_ms = std::strtol(s, nullptr, 0);
+  // Lockstep needs the slot clock + a hopset; the seed is optional — with it
+  // the RX tracks the keyed order, without it the public sequential order. Both
+  // ride the same HopSyncMarker.
+  const bool hop_rx = hop_rx_slot_ms > 0 && !hop_rx_channels.empty();
+  if (hop_rx && !g_rx_sweep.empty())
+    throw std::invalid_argument(
+        "lockstep hopping and DEVOURER_RX_SWEEP are mutually exclusive");
+  if (hop_rx) {
+    const char *seed = std::getenv("DEVOURER_HOP_SEED");
+    g_hop_schedule = std::make_unique<devourer::HopSchedule>(
+        seed ? devourer::HopSchedule(devourer::HopSchedule::parse_seed(seed))
+             : devourer::HopSchedule::sequential());
+    if (std::getenv("DEVOURER_HOP_ADAPTIVE")) {
+      /* Adaptive follower — needs the keyed schedule (control MAC derives
+       * from the same seed) and a <=64-channel base. */
+      if (!seed)
+        throw std::invalid_argument(
+            "DEVOURER_HOP_ADAPTIVE needs DEVOURER_HOP_SEED");
+      if (hop_rx_channels.size() > devourer::hopset::kMaxBaseChannels)
+        throw std::invalid_argument("adaptive hopset caps the base at 64");
+      g_hopset_keys = std::make_unique<devourer::hopset::HopsetKeys>(
+          devourer::hopset::HopsetKeys::derive(
+              devourer::HopSchedule::parse_seed(seed)));
+      devourer::hopset::HopsetParams hp;
+      hp.n_base = hop_rx_channels.size();
+      /* Announce ourselves only when we are a participant that would speak
+       * anyway (the policy proposes); a pure follower stays silent so every
+       * slot it owns is spent listening. */
+      if (std::getenv("DEVOURER_HOP_POLICY"))
+        hp.follower_status_slots = 64;
+      if (const char *hb = std::getenv("DEVOURER_HOP_STATUS_SLOTS"))
+        hp.follower_status_slots = std::strtoull(hb, nullptr, 0);
+      std::vector<uint32_t> chlist(hop_rx_channels.begin(),
+                                   hop_rx_channels.end());
+      hp.base_fp = devourer::hopset::hopset_fp(*g_hopset_keys, chlist.data(),
+                                               chlist.size());
+      /* Keyed recovery probes: every N rounds one data opportunity is spent
+       * on an excluded channel so it can prove it recovered. Shared config —
+       * the transmitter derives the same placement from the same seed. */
+      unsigned probe_rounds = 8;
+      if (const char *pr = std::getenv("DEVOURER_HOP_PROBE_ROUNDS"))
+        probe_rounds = static_cast<unsigned>(std::strtoul(pr, nullptr, 0));
+      /* Receiver-driven exclusion. Without it the follower still tracks
+       * commits, it just never proposes one. */
+      if (std::getenv("DEVOURER_HOP_POLICY")) {
+        devourer::hopset::HopsetPolicyConfig pc;
+        auto envu = [](const char *n, uint32_t &dst) {
+          if (const char *e = std::getenv(n))
+            dst = static_cast<uint32_t>(std::strtoul(e, nullptr, 0));
+        };
+        auto envd = [](const char *n, double &dst) {
+          if (const char *e = std::getenv(n))
+            dst = std::strtod(e, nullptr);
+        };
+        envu("DEVOURER_HOP_POLICY_MIN_ROUNDS", pc.min_obs_rounds);
+        envu("DEVOURER_HOP_POLICY_IMPAIRED_ROUNDS", pc.impaired_rounds);
+        envd("DEVOURER_HOP_POLICY_EXCLUDE_DELIVERY", pc.exclude_delivery);
+        envd("DEVOURER_HOP_POLICY_HEALTHY_DELIVERY", pc.healthy_delivery);
+        envu("DEVOURER_HOP_POLICY_MIN_ACTIVE", pc.min_active);
+        envd("DEVOURER_HOP_POLICY_RESTORE_DELIVERY", pc.restore_delivery);
+        envu("DEVOURER_HOP_POLICY_RESTORE_PROBES", pc.restore_probes);
+        if (const char *e = std::getenv("DEVOURER_HOP_POLICY_COOLDOWN_ROUNDS"))
+          pc.update_cooldown_rounds = std::strtoull(e, nullptr, 0);
+        /* the hard floor is max(3, configured) — the policy applies it, the
+         * authority enforces its own copy */
+        if (pc.min_active < 3)
+          pc.min_active = 3;
+        if (hp.min_active < pc.min_active)
+          hp.min_active = pc.min_active;
+        g_hopset_policy = std::make_unique<devourer::hopset::HopsetPolicy>(
+            pc, hop_rx_channels.size());
+        if (const char *v = std::getenv("DEVOURER_HOP_POLICY_EVENTS"))
+          g_hopset_verbose_events = std::atoi(v) >= 2;
+        logger->info("DEVOURER_HOP_POLICY — receiver-driven exclusion armed "
+                     "(min_active={}, probe every {} rounds, policy 0x{:08x})",
+                     pc.min_active, probe_rounds, pc.policy_hash());
+      }
+      g_hopset_fol = std::make_unique<devourer::hopset::HopsetFollower>(
+          hp, static_cast<uint32_t>(std::random_device{}()));
+      g_hopset_view = std::make_unique<devourer::hopset::AdaptiveScheduleView>(
+          *g_hop_schedule, *g_hopset_keys, hop_rx_channels.size());
+      g_hopset_view->set_state(g_hopset_fol->state());
+      g_hopset_view->set_probe_period(probe_rounds);
+      g_hopset_dev = rtlDevice;
+      if (std::getenv("DEVOURER_HOP_MUTE")) {
+        g_hopset_mute = true;
+        logger->warn("DEVOURER_HOP_MUTE — uplink muted: this side follows but "
+                     "never answers");
+      }
+    }
+    g_hop_slot_us = static_cast<uint64_t>(hop_rx_slot_ms) * 1000;
+    long acquire_ms = hop_rx_slot_ms * 2;
+    if (const char *a = std::getenv("DEVOURER_HOP_ACQUIRE_MS")) {
+      acquire_ms = std::strtol(a, nullptr, 0);
+      if (acquire_ms < 1)
+        acquire_ms = 1;
+    }
+    IRadio *dev = rtlDevice;
+    SelectedChannel first{static_cast<uint8_t>(hop_rx_channels[0]), ch_offset,
+                          width};
+    std::thread rx([dev, first, &logger]() {
+      try {
+        dev->Init(packetProcessor, first);
+      } catch (const std::exception &e) {
+        logger->error("lockstep RX failed: {}", e.what());
+      }
+    });
+    /* Do not race FastRetune against firmware/calibration bring-up. A frame on
+     * the parked channel proves RX is live; a silent link uses the same 10 s
+     * conservative cap as DEVOURER_RX_SWEEP below. */
+    for (int waited = 0;
+         waited < 10000 && !g_devourer_should_stop && g_rx_count == 0;
+         waited += 50)
+      std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    size_t scan = 0;
+    uint64_t tuned_slot = UINT64_MAX;
+    bool tracking = false;
+    long long next_scan = steady_us() + acquire_ms * 1000;
+    devourer::Ev(*g_ev, "hop.rx")
+        .f("state", "acquire")
+        .f("channel", hop_rx_channels[0]);
+    while (!g_devourer_should_stop) {
+      const long long now = steady_us(), last = g_hop_last_marker_us.load();
+      bool hopset_recovering = false;
+      if (g_hopset_fol) {
+        /* follower heartbeat: pending activation at the slot boundary; a
+         * Recovering follower falls back to the base-hopset acquire scan
+         * below until an authenticated commit/status re-syncs it */
+        std::lock_guard<std::mutex> lk(g_hopset_mu);
+        g_hopset_now_slot.store(hopset_slot_now());
+        hopset_route(g_hopset_fol->on_tick(g_hopset_now_slot.load()));
+        hopset_recovering = g_hopset_fol->fsm() ==
+                            devourer::hopset::HopsetFollower::State::Recovering;
+      }
+      hopset_flush();
+      if (!hopset_recovering && last &&
+          now - last < static_cast<long long>(3 * g_hop_slot_us)) {
+        if (!tracking) {
+          tracking = true;
+          devourer::Ev(*g_ev, "hop.rx")
+              .f("state", "track")
+              .f("epoch", g_hop_epoch.load());
+        }
+        const long long anchor = g_hop_anchor_us.load();
+        if (anchor > 0 && now >= anchor) {
+          uint64_t slot = static_cast<uint64_t>(
+              (now - anchor) / static_cast<long long>(g_hop_slot_us));
+          /* Phase correction may move the fitted boundary slightly forward.
+           * Never follow that jitter backwards into a slot already visited. */
+          if (tuned_slot == UINT64_MAX || slot > tuned_slot) {
+            /* Close out the dwell we are leaving before retuning: whether
+             * the transmitter's marker arrived is this channel's score for
+             * the round, and the frame counters refine it into a ratio. */
+            if (g_hopset_policy && tuned_slot != UINT64_MAX) {
+              const bool decoded = !g_hop_decode_pending.load();
+              const uint32_t frames = g_slot_acc_frames.exchange(0);
+              const uint32_t crc = g_slot_acc_crc.exchange(0);
+              const int rssi_sum = g_slot_acc_rssi.exchange(0);
+              const int snr_sum = g_slot_acc_snr.exchange(0);
+              const int evm_sum = g_slot_acc_evm.exchange(0);
+              std::lock_guard<std::mutex> lk(g_hopset_mu);
+              const auto closed = g_hopset_view->slot_info(tuned_slot);
+              devourer::hopset::SlotObservation o;
+              o.slot = tuned_slot;
+              o.round = hopset_round_of(*g_hopset_view, tuned_slot,
+                                        hop_rx_channels.size());
+              o.base_index = static_cast<uint32_t>(closed.base_index);
+              o.is_probe = closed.is_probe;
+              o.decoded = decoded;
+              o.frames = frames;
+              o.crc_errs = crc;
+              o.dead_us = g_slot_dead_us.exchange(0);
+              if (frames) {
+                o.rssi = rssi_sum / static_cast<int>(frames);
+                o.snr = snr_sum / static_cast<int>(frames);
+                o.evm = evm_sum / static_cast<int>(frames);
+              }
+              g_hopset_policy->ingest(o);
+              if (closed.is_probe)
+                devourer::hopset::emit_probe(
+                    *g_ev, "rx", tuned_slot, o.round, o.base_index,
+                    hop_rx_channels[closed.base_index], decoded, frames);
+              /* A round just closed: let the policy speak, and if it wants a
+               * change, send the proposal now — right after the boundary is
+               * the reserved low-rate control opportunity. */
+              const uint64_t r_now = hopset_round_of(*g_hopset_view, slot,
+                                                     hop_rx_channels.size());
+              if (r_now != o.round) {
+                auto d = g_hopset_policy->decide(r_now);
+                if (d.kind != devourer::hopset::HopsetDecision::Kind::Hold ||
+                    g_hopset_verbose_events)
+                  devourer::hopset::emit_decision(*g_ev, d, slot, r_now,
+                                                  g_hopset_verbose_events);
+                if (d.kind != devourer::hopset::HopsetDecision::Kind::Hold)
+                  hopset_route(g_hopset_fol->propose(
+                      d.proposed_mask, d.observation_count, d.reason_bitmap,
+                      static_cast<uint32_t>(std::random_device{}()), slot));
+              }
+            }
+            hopset_flush();
+            int ch;
+            bool probe = false;
+            if (g_hopset_view) {
+              std::lock_guard<std::mutex> lk(g_hopset_mu);
+              const auto si = g_hopset_view->slot_info(slot);
+              ch = hop_rx_channels[si.base_index];
+              probe = si.is_probe;
+            } else {
+              ch = g_hop_schedule->channel(slot, hop_rx_channels);
+            }
+            auto t0 = steady_us();
+            dev->FastRetune(static_cast<uint8_t>(ch), true);
+            auto done = steady_us();
+            g_hop_last_retune_us.store(done);
+            g_hop_decode_pending.store(true);
+            g_slot_acc_frames.store(0);
+            g_slot_acc_crc.store(0);
+            g_slot_acc_rssi.store(0);
+            g_slot_acc_snr.store(0);
+            g_slot_acc_evm.store(0);
+            tuned_slot = slot;
+            devourer::Ev ev(*g_ev, "hop.rx");
+            ev.f("state", "retune")
+                .f("slot", (unsigned long long)slot)
+                .f("channel", ch)
+                .f("retune_us", done - t0);
+            if (probe)
+              ev.f("probe", true);
+          }
+        }
+      } else {
+        if (tracking) {
+          tracking = false;
+          tuned_slot = UINT64_MAX;
+          devourer::Ev(*g_ev, "hop.rx").f("state", "lost");
+          next_scan = now;
+        }
+        if (now >= next_scan) {
+          scan = (scan + 1) % hop_rx_channels.size();
+          int ch = hop_rx_channels[scan];
+          auto t0 = steady_us();
+          dev->FastRetune(static_cast<uint8_t>(ch), true);
+          devourer::Ev(*g_ev, "hop.rx")
+              .f("state", "acquire")
+              .f("channel", ch)
+              .f("retune_us", steady_us() - t0);
+          next_scan = now + acquire_ms * 1000;
+        }
+      }
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    dev->StopRxLoop();
+    if (rx.joinable())
+      rx.join();
+    stop_background_emitters.Run();
+    dev->Stop();
+    session.close();
+    return 0;
+  }
+
+  /* DEVOURER_RX_SWEEP: live spectrum sweep. Run the (blocking) RX bring-up +
+   * loop on a worker thread so the main thread is free to retune between energy
+   * reads. StopRxLoop unblocks it on SIGINT. */
+  if (!g_rx_sweep.empty()) {
+    logger->info("DEVOURER_RX_SWEEP: {} bins, dwell {} ms — live spectrum map",
+                 g_rx_sweep.size(), g_rx_sweep_dwell_ms);
+    IRadio *dev = rtlDevice;
+    IRtlRadio *const rtl = dynamic_cast<IRtlRadio *>(rtlDevice);
+    if (!rtl)
+      logger->warn("DEVOURER_RX_SWEEP: frame-free energy is Realtek-only "
+                   "(IRtlRadio) — bins carry frame stats only");
+    SelectedChannel first{static_cast<uint8_t>(g_rx_sweep[0]), ch_offset, width};
+    std::thread rx([dev, rtl, first, &logger]() {
+      try {
+        dev->Init(packetProcessor, first);
+      } catch (const std::exception &e) {
+        logger->error("RX-sweep bring-up failed: {}", e.what());
+      }
+    });
+    /* Let bring-up complete before the first retune: a retune racing the
+     * worker thread's init (FW download, DACK/IQK on Jaguar3) interleaves
+     * register writes with calibration. The first RX frame proves bring-up
+     * finished; a silent channel falls through after the 10 s cap. */
+    for (int s = 0; s < 10000 && !g_devourer_should_stop && g_rx_count == 0;
+         s += 50)
+      std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    size_t bi = 0;
+    /* Dwell retunes ride FastRetune (lean intra-band fast path on every
+     * generation, internal full-path fallback on a band change);
+     * DEVOURER_RX_SWEEP_FULL=1 forces the full SetMonitorChannel per dwell
+     * (A/B escape hatch). */
+    const bool sweep_full = std::getenv("DEVOURER_RX_SWEEP_FULL") != nullptr;
+    while (!g_devourer_should_stop) {
+      int ch = g_rx_sweep[bi % g_rx_sweep.size()];
+      ++bi;
+      const auto rt0 = std::chrono::steady_clock::now();
+      if (sweep_full)
+        dev->SetMonitorChannel(
+            SelectedChannel{static_cast<uint8_t>(ch), ch_offset, width});
+      else
+        dev->FastRetune(static_cast<uint8_t>(ch), /*cache_rf=*/true);
+      const long long retune_us =
+          std::chrono::duration_cast<std::chrono::microseconds>(
+              std::chrono::steady_clock::now() - rt0)
+              .count();
+      {
+        /* Drop frames captured before/during the retune — the dwell's frame
+         * stats must only cover this bin. */
+        std::lock_guard<std::mutex> lk(g_rxagg_mu);
+        g_rxagg = RxAgg{};
+      }
+      for (uint32_t s = 0; s < g_rx_sweep_dwell_ms && !g_devourer_should_stop;
+           s += 50)
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+      RxEnergy e = rtl ? rtl->GetRxEnergy(true) : RxEnergy{};
+      RxAgg agg;
+      {
+        std::lock_guard<std::mutex> lk(g_rxagg_mu);
+        agg = g_rxagg;
+        g_rxagg = RxAgg{};
+      }
+      int rssi_mean = agg.n ? agg.rssi_sum / static_cast<int>(agg.n) : 0;
+      int snr_mean = agg.n ? agg.snr_sum / static_cast<int>(agg.n) : 0;
+      int evm_mean = agg.evm_n ? agg.evm_sum / static_cast<int>(agg.evm_n) : 0;
+      {
+        devourer::Ev ev(*g_ev, "rx.energy");
+        ev.t().f("ch", ch);
+        if (e.valid_fa)
+          ev.f("cca_ofdm", e.cca_ofdm)
+              .f("cca_cck", e.cca_cck)
+              .f("fa_ofdm", e.fa_ofdm)
+              .f("fa_cck", e.fa_cck);
+        else
+          ev.f("cca_ofdm", nullptr)
+              .f("cca_cck", nullptr)
+              .f("fa_ofdm", nullptr)
+              .f("fa_cck", nullptr);
+        if (e.valid_igi)
+          ev.f("igi", e.igi);
+        else
+          ev.f("igi", nullptr);
+        emit_ccx(ev, e);
+        ev.f("retune_us", retune_us)
+            .f("frames", agg.n)
+            .f("frames_ldpc", agg.n_ldpc)
+            .f("frames_stbc", agg.n_stbc)
+            .f("crc_err", agg.n_crc)
+            .f("icv_err", agg.n_icv)
+            .f("rssi_mean", rssi_mean)
+            .f("rssi_max", agg.n ? agg.rssi_max : 0)
+            .f("snr_mean", snr_mean)
+            .f("snr_min", agg.n ? agg.snr_min : 0)
+            .f("evm_mean", evm_mean);
+      }
+      emit_nhm(e, ch);
+    }
+    dev->StopRxLoop();
+    if (rx.joinable())
+      rx.join();
+    stop_background_emitters.Run();
+    dev->Stop();
+    session.close();
+    return 0;
+  }
+
+  /* DEVOURER_LA_CAPTURE: one-shot LA-mode IQ capture from a worker thread —
+   * waits for RX to be live (first frame, 10 s cap), then the settle delay,
+   * then runs the blocking arm → poll → readback sequence once. Register
+   * traffic shares libusb with the RX bulk loop like the energy/thermal
+   * pollers. */
+  std::thread la_thread;
+  if (g_la_spec && *g_la_spec) {
+    devourer::LaParams la_params;
+    la_params.max_samples = g_la_max;
+    if (!parse_la_spec(g_la_spec, la_params)) {
+      logger->error("DEVOURER_LA_CAPTURE: bad spec '{}'", g_la_spec);
+      return 1;
+    }
+    auto runner = la_runner_for(rtlDevice);
+    if (!runner) {
+      logger->error("DEVOURER_LA_CAPTURE: no LA support wired for this "
+                    "generation yet");
+      return 1;
+    }
+    logger->info("DEVOURER_LA_CAPTURE='{}' — one-shot capture after RX is "
+                 "live (+{} ms settle) -> {}", g_la_spec, g_la_delay_ms,
+                 g_la_out);
+    la_thread = std::thread([runner, la_params]() {
+      for (int w = 0; w < 10000 && !g_devourer_should_stop && g_rx_count == 0;
+           w += 50)
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+      for (uint32_t s = 0; s < g_la_delay_ms && !g_devourer_should_stop;
+           s += 50)
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+      if (g_devourer_should_stop)
+        return;
+      run_la_capture(runner, la_params);
+    });
+  }
+
+  /* DEVOURER_BAND=6 selects the 6 GHz band (WiFi 6E, RTL8852C tri-band) — a 6G
+   * channel number collides with a 5G one, so the band must be explicit. */
+  uint8_t rx_band = 0;
+  if (const char *b = std::getenv("DEVOURER_BAND"))
+    rx_band = static_cast<uint8_t>(std::atoi(b));
+  rtlDevice->Init(packetProcessor, SelectedChannel{
+                                       .Channel = static_cast<uint8_t>(channel),
+                                       .ChannelOffset = ch_offset,
+                                       .ChannelWidth = width,
+                                       .Band = rx_band,
+                                   });
+  stop_background_emitters.Run();
+  if (la_thread.joinable())
+    la_thread.join();
+
+  /* Clean chip de-init before dropping the interface (card-disable PWR_SEQ), so
+   * the adapter re-enumerates instead of hanging its USB core. */
+  rtlDevice->Stop();
+
+  /* Device, then interface, handle and context (DeviceSession.h). Explicit
+   * only because the process has nothing left to do here — the destructor
+   * does exactly the same on every other exit path. */
+  session.close();
+
+  return 0;
+}

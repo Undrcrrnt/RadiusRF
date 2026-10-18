@@ -1,0 +1,163 @@
+package app.radiusrf.features.emf_mapper.viewmodel
+
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import app.radiusrf.features.emf_mapper.domain.EmfDataProcessor
+import app.radiusrf.features.emf_mapper.domain.EmfMapperState
+import app.radiusrf.features.sensors.domain.MetalDetector
+import app.radiusrf.features.sensors.domain.SensorDataCollector
+import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+import javax.inject.Inject
+
+@HiltViewModel
+class EmfMapperViewModel @Inject constructor(
+    private val sensorDataCollector: SensorDataCollector
+) : ViewModel() {
+
+    private val metalDetector = MetalDetector()
+    private val processor = EmfDataProcessor()
+
+    private val _state = MutableStateFlow(EmfMapperState())
+    val state: StateFlow<EmfMapperState> = _state.asStateFlow()
+
+    private var recordingJob: Job? = null
+    private var timerJob: Job? = null
+    private var recordingStartTime: Long = 0L
+
+    init {
+        // Check sensor availability on init
+        viewModelScope.launch {
+            sensorDataCollector.start()
+            delay(200)
+            val available = sensorDataCollector.magnetometer.value.isAvailable
+            if (!available) {
+                _state.value = _state.value.copy(
+                    sensorAvailable = false,
+                    error = "Magnetometer sensor not available on this device"
+                )
+            }
+            sensorDataCollector.stop()
+        }
+    }
+
+    fun startRecording() {
+        if (_state.value.isRecording) return
+        if (!_state.value.sensorAvailable) return
+
+        val keep = _state.value.isPaused
+        sensorDataCollector.start()
+        if (!keep) {
+            metalDetector.reset()
+            recordingStartTime = System.currentTimeMillis()
+        }
+
+        _state.value = _state.value.copy(
+            isRecording = true,
+            isPaused = false,
+            error = null
+        )
+
+        // Sensor collection at ~10Hz
+        recordingJob = viewModelScope.launch {
+            sensorDataCollector.magnetometer.collect { sensorReading ->
+                if (!_state.value.isRecording) return@collect
+                if (sensorReading.values.size < 3) return@collect
+
+                val metalState = metalDetector.update(sensorReading.values)
+                val emfReading = processor.processReading(sensorReading.values, metalState.baseline)
+
+                val currentHistory = _state.value.history.toMutableList()
+                currentHistory.add(emfReading)
+                // Keep last 300 readings (30 seconds at 10Hz)
+                if (currentHistory.size > 300) {
+                    currentHistory.removeAt(0)
+                }
+
+                val isHotspot = processor.detectHotspot(emfReading)
+                val hotspotCount = if (isHotspot) _state.value.hotspots + 1 else _state.value.hotspots
+
+                val (min, max, avg) = processor.getStatistics(currentHistory)
+
+                _state.value = _state.value.copy(
+                    currentReading = emfReading,
+                    baseline = metalState.baseline,
+                    peakMagnitude = max,
+                    minMagnitude = min,
+                    avgMagnitude = avg,
+                    history = currentHistory,
+                    hotspots = hotspotCount
+                )
+
+                delay(100) // ~10Hz sampling
+            }
+        }
+
+        // Duration timer
+        timerJob = viewModelScope.launch {
+            while (_state.value.isRecording) {
+                _state.value = _state.value.copy(
+                    recordingDurationMs = System.currentTimeMillis() - recordingStartTime
+                )
+                delay(1000)
+            }
+        }
+    }
+
+    fun pauseRecording() {
+        if (!_state.value.isRecording) return
+        recordingJob?.cancel()
+        recordingJob = null
+        timerJob?.cancel()
+        timerJob = null
+        sensorDataCollector.stop()
+        _state.value = _state.value.copy(
+            isRecording = false,
+            isPaused = true,
+            recordingDurationMs = System.currentTimeMillis() - recordingStartTime
+        )
+    }
+
+    fun resumeRecording() = startRecording()
+
+    fun stopRecording() {
+        recordingJob?.cancel()
+        recordingJob = null
+        timerJob?.cancel()
+        timerJob = null
+        sensorDataCollector.stop()
+
+        _state.value = _state.value.copy(
+            isRecording = false,
+            isPaused = false,
+            recordingDurationMs = System.currentTimeMillis() - recordingStartTime
+        )
+    }
+
+    fun resetBaseline() {
+        metalDetector.reset()
+        _state.value = _state.value.copy(baseline = 0f)
+    }
+
+    fun clearHistory() {
+        recordingJob?.cancel()
+        recordingJob = null
+        timerJob?.cancel()
+        timerJob = null
+        sensorDataCollector.stop()
+        metalDetector.reset()
+
+        _state.value = EmfMapperState(sensorAvailable = _state.value.sensorAvailable)
+    }
+
+    override fun onCleared() {
+        recordingJob?.cancel()
+        timerJob?.cancel()
+        sensorDataCollector.stop()
+    }
+}

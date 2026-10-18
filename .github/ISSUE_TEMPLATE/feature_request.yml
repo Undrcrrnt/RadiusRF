@@ -1,0 +1,38 @@
+name: Feature / new tool request
+description: Suggest a new tool or an improvement to an existing one
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: What invisible signal, threat, or workflow gap does this address?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed approach
+      description: How should it work? Which Android APIs / hardware would it need?
+    validations:
+      required: true
+
+  - type: dropdown
+    id: category
+    attributes:
+      label: Category
+      options:
+        - Wireless
+        - RF & Signals
+        - Sensors
+        - Network
+        - Security
+        - Not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered

@@ -1,0 +1,22 @@
+<resources>
+    <string name="app_name">RadiusRF</string>
+
+    <!-- HCE -->
+    <string name="hce_service_description">RadiusRF NFC Card Emulation</string>
+    <string name="hce_aid_group_description">NDEF Tag Emulation</string>
+
+    <!-- Ethical use -->
+    <string name="ethical_title">Responsible Use Agreement</string>
+    <string name="ethical_message">RadiusRF is a hardware exploration tool for educational purposes. You agree to:\n\n\u2022 Only scan devices and networks you own or have permission to test\n\u2022 Not use this tool for unauthorized access or surveillance\n\u2022 Comply with all applicable local laws and regulations\n\nMisuse of wireless scanning tools may violate federal and state laws.</string>
+    <string name="ethical_accept">I Agree</string>
+    <string name="ethical_decline">Decline</string>
+
+    <string name="widget_status_label">RadiusRF status</string>
+    <string name="widget_status_description">Open alerts, your last sweep and one-tap Sweep, Trackers and WiFi</string>
+    <string name="widget_tracker_label">Tracker check</string>
+    <string name="widget_tracker_description">Your last tracker check; tap to run another</string>
+    <string name="tile_sweep">Room sweep</string>
+    <string name="tile_tracker">Tracker check</string>
+    <string name="tile_watch">Watch rules</string>
+    <string name="tile_nfc">Read NFC</string>
+</resources>

@@ -1,0 +1,54 @@
+name: Bug report
+description: Something in RadiusRF isn't working as expected
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. Most RadiusRF features depend on real hardware (BLE, NFC, UWB, IR, etc.) —
+        please double-check the [Hardware Compatibility](../../docs/HARDWARE.md) doc first
+        to rule out a device limitation before filing.
+
+  - type: input
+    id: tool
+    attributes:
+      label: Which tool?
+      description: e.g. "WiFi Analyzer", "Rogue AP Detector", "Alert Center"
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you expect, and what actually happened instead?
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open ...
+        2. Tap ...
+        3. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: device
+    attributes:
+      label: Device info
+      placeholder: |
+        Phone model:
+        Android version:
+        RadiusRF version / commit:
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logcat output (if any)
+      render: shell

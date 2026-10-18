@@ -1,0 +1,41 @@
+# Normalize line endings across platforms.
+# Git stores text files with LF internally and checks them out
+# with the contributor's native line endings.
+* text=auto
+
+# Explicitly treat common source/text files as text (LF in repo).
+*.kt      text
+*.kts     text
+*.java    text
+*.xml     text
+*.json    text
+*.pro     text
+*.md      text
+*.txt     text
+*.properties text
+*.cfg     text
+*.yml     text
+*.yaml    text
+
+# Scripts must keep LF regardless of platform.
+*.sh      text eol=lf
+gradlew   text eol=lf
+
+# Windows-only scripts keep CRLF.
+*.bat     text eol=crlf
+gradlew.bat text eol=crlf
+
+# Binary files: never touch line endings.
+*.png     binary
+*.jpg     binary
+*.jpeg    binary
+*.gif     binary
+*.webp    binary
+*.ico     binary
+*.jar     binary
+*.keystore binary
+*.jks     binary
+*.so      binary
+*.aar     binary
+*.ttf     binary
+*.otf     binary

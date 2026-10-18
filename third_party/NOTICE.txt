@@ -1,0 +1,14 @@
+OpenIPC devourer (GNU GPL v2) is vendored in third_party/devourer for
+receive-only RTL8821AU / Jaguar1 support, including TP-Link Archer T2U Plus
+(2357:0120).
+
+https://github.com/OpenIPC/devourer
+
+libusb 1.0.27 (LGPL-2.1) is vendored in third_party/libusb and linked as a
+shared library inside the APK.
+
+https://github.com/libusb/libusb
+
+A binary that links devourer must be distributed under GPL-2.0 and must
+include corresponding source. Empty Set uses devourer only as a receive path.
+Transmit and packet-injection APIs are not called.

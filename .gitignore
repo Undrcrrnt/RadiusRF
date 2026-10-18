@@ -1,0 +1,27 @@
+*.iml
+.gradle
+.idea/
+local.properties
+.DS_Store
+/build
+/app/build
+/captures
+.externalNativeBuild
+.cxx
+
+# Release signing -- never commit the keystore or its credentials
+keystore.properties
+*.jks
+*.keystore
+
+# Windows folder icon for this directory
+/desktop.ini
+/icon.ico
+/RadiusRf.ico
+
+# Not part of this repository
+/upstream-archive/
+*.apk
+TRENDING_PLAN.md
+ROOMSCOUT.md
+third_party/devourer/.git.bak/
