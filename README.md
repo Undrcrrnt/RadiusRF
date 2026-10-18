@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/banner.jpg" alt="RadiusRF — Fidelity Within the Noise" width="100%">
+</p>
+
 <h1 align="center">RadiusRF</h1>
 
 <p align="center">
