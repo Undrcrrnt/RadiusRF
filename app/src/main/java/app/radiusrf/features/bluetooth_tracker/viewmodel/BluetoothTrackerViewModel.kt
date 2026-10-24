@@ -104,9 +104,9 @@ class BluetoothTrackerViewModel @Inject constructor(
                 }
                 .collect { devices ->
                     totalDevicesScanned = devices.size
-                    val now = System.currentTimeMillis()
 
                     for (device in devices) {
+                        val now = device.lastSeen
                         val match = identifier.match(device) ?: continue
                         notePlace(match.identity)
                         val placeCount = places[match.identity]?.size ?: 0
@@ -230,16 +230,17 @@ class BluetoothTrackerViewModel @Inject constructor(
         }
     }
 
-    private fun lastLocation(): Pair<Double, Double>? {
+    private fun lastLocation(): Pair<Double, Double>? = runCatching {
         val fine = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
         val coarse = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
-        if (!fine && !coarse) return null
-        val manager = context.getSystemService(LocationManager::class.java) ?: return null
+        if (!fine && !coarse) return@runCatching null
+        val manager = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager
+            ?: return@runCatching null
         val fix = listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER)
             .firstNotNullOfOrNull { provider -> runCatching { manager.getLastKnownLocation(provider) }.getOrNull() }
-            ?: return null
-        return fix.latitude to fix.longitude
-    }
+            ?: return@runCatching null
+        fix.latitude to fix.longitude
+    }.getOrNull()
 
     private fun meters(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
         val r = 6_371_000.0
@@ -257,7 +258,7 @@ class BluetoothTrackerViewModel @Inject constructor(
     }
 
     companion object {
-        private const val MIN_ALERT_RANK = 3
+        private const val MIN_ALERT_RANK = 2
     }
 
     private fun recordSession(startedAt: Long) {

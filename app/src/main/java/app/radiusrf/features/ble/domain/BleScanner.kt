@@ -6,7 +6,6 @@ import android.bluetooth.le.BluetoothLeScanner
 import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanResult
 import android.bluetooth.le.ScanSettings
-import android.util.Log
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -44,11 +43,6 @@ class BleScanner(
         val callback = object : ScanCallback() {
             override fun onScanResult(callbackType: Int, result: ScanResult) {
                 val resolvedName = result.scanRecord?.deviceName ?: result.device.name
-                Log.d(
-                    "BleScanner",
-                    "addr=${result.device.address} rssi=${result.rssi} scanRecordName=${result.scanRecord?.deviceName} " +
-                        "deviceName=${result.device.name} bytes=${result.scanRecord?.bytes?.size} raw=${result.scanRecord?.bytes?.joinToString("") { "%02x".format(it) }}"
-                )
                 val record = result.scanRecord
                 val manufacturers = buildMap {
                     val sparse = record?.manufacturerSpecificData

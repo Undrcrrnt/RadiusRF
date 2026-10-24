@@ -56,7 +56,7 @@ class WigleExporterTest {
 
     @Test
     fun `null ssid and capabilities become empty columns and unknown bands map to channel 0`() {
-        val row = rows(WigleExporter.export(listOf(record(ssid = null, capabilities = null, frequency = 6000)))).last()
+        val row = rows(WigleExporter.export(listOf(record(ssid = null, capabilities = null, frequency = 1000)))).last()
         val cols = row.split(",")
 
         assertEquals("", cols[1])

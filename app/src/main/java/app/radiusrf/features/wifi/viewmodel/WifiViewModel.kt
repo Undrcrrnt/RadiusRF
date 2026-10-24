@@ -6,6 +6,7 @@ import app.radiusrf.core.util.WifiBand
 import app.radiusrf.features.wifi.domain.ChannelAnalyzer
 import app.radiusrf.features.wifi.domain.ChannelScore
 import app.radiusrf.features.wifi.domain.WifiAccessPoint
+import app.radiusrf.features.wifi.domain.WifiClient
 import app.radiusrf.features.wifi.domain.WifiScanner
 import app.radiusrf.core.debug.DemoData
 import app.radiusrf.core.debug.DemoDataBus
@@ -18,7 +19,6 @@ import app.radiusrf.features.wifi.domain.WifiNicPreference
 import app.radiusrf.features.wifi.domain.WifiNicSource
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -75,8 +75,7 @@ class WifiViewModel @Inject constructor(
     }
 
     private var scanJob: Job? = null
-    private var autoStopJob: Job? = null
-    private var runInBackground = false
+    private val heardClients = LinkedHashMap<String, HeardClient>()
 
     /** When the current run started; null when no run is in progress. */
     private var runStartedAt: Long? = null
@@ -87,7 +86,10 @@ class WifiViewModel @Inject constructor(
 
     fun startScan() {
         if (scanJob?.isActive == true) return
-        if (!_isPaused.value) runStartedAt = System.currentTimeMillis()
+        if (!_isPaused.value) {
+            runStartedAt = System.currentTimeMillis()
+            heardClients.clear()
+        }
         _isPaused.value = false
         _isScanning.value = true
         _error.value = null
@@ -100,37 +102,20 @@ class WifiViewModel @Inject constructor(
                     _error.value = "WiFi scan error: ${e.message}"
                 }
                 .collect { aps ->
-                    _accessPoints.value = aps
-                    _channelScores.value = ChannelAnalyzer.analyze(aps)
+                    rememberClients(aps)
+                    val shown = withLoggedClients(aps)
+                    _accessPoints.value = shown
+                    _channelScores.value = ChannelAnalyzer.analyze(shown)
                 }
-        }
-        autoStopJob?.cancel()
-        if (!runInBackground) {
-            autoStopJob = viewModelScope.launch {
-                delay(AUTO_STOP_TIMEOUT_MS)
-                stopScan()
-            }
         }
     }
 
-    /** A background run should not hit the 30 second cutoff. */
-    fun setRunInBackground(on: Boolean) {
-        runInBackground = on
-        if (!_isScanning.value) return
-        autoStopJob?.cancel()
-        autoStopJob = null
-        if (!on) {
-            autoStopJob = viewModelScope.launch {
-                delay(AUTO_STOP_TIMEOUT_MS)
-                stopScan()
-            }
-        }
-    }
+    /** Background mode is owned by the scan bar. This scan has no time limit. */
+    @Suppress("UNUSED_PARAMETER")
+    fun setRunInBackground(on: Boolean) = Unit
 
     fun pauseScan() {
         if (!_isScanning.value) return
-        autoStopJob?.cancel()
-        autoStopJob = null
         scanJob?.cancel()
         scanJob = null
         _isScanning.value = false
@@ -145,15 +130,9 @@ class WifiViewModel @Inject constructor(
             runStartedAt = null
             recordSession(started)
         }
-        autoStopJob?.cancel()
-        autoStopJob = null
         scanJob?.cancel()
         scanJob = null
         _isScanning.value = false
-    }
-
-    companion object {
-        private const val AUTO_STOP_TIMEOUT_MS = 30_000L
     }
 
     fun selectBand(band: WifiBand?) {
@@ -163,6 +142,16 @@ class WifiViewModel @Inject constructor(
     private fun recordSession(startedAt: Long) {
         val aps = _accessPoints.value
         val weak = aps.count { WifiAssessment.isWeak(it.security) }
+        val clients = heardClients.values.map { client ->
+            SessionItem(
+                key = "${client.mac}|${client.apBssid}",
+                label = client.mac,
+                kind = ItemKind.CLIENT,
+                rssi = client.rssi,
+                detail = "Client of ${client.apName} · ${client.apBssid}"
+            )
+        }
+        val clientNote = if (heardClients.isEmpty()) "" else " · ${heardClients.size} clients"
         sessions.recordInBackground(
             tool = "wifi",
             title = "WiFi scan",
@@ -176,10 +165,48 @@ class WifiViewModel @Inject constructor(
                     detail = "${ap.security.label} · ch ${ap.channel}",
                     flagged = WifiAssessment.isWeak(ap.security)
                 )
-            },
-            summary = "${aps.size} networks" + if (weak > 0) " · $weak weak security" else " · all encrypted"
+            } + clients,
+            summary = "${aps.size} networks$clientNote" + if (weak > 0) " · $weak weak security" else " · all encrypted"
         )
     }
+
+    private fun rememberClients(aps: List<WifiAccessPoint>) {
+        aps.forEach { ap ->
+            ap.clients.forEach { client ->
+                heardClients["${client.mac.lowercase()}|${ap.bssid.lowercase()}"] = HeardClient(
+                    mac = client.mac,
+                    apBssid = ap.bssid,
+                    apName = WifiAssessment.displayName(ap),
+                    rssi = client.rssi,
+                    role = client.role
+                )
+            }
+        }
+    }
+
+    private fun withLoggedClients(aps: List<WifiAccessPoint>): List<WifiAccessPoint> {
+        if (heardClients.isEmpty()) return aps
+        return aps.map { ap ->
+            val logged = heardClients.values.filter { it.apBssid.equals(ap.bssid, ignoreCase = true) }
+            if (logged.isEmpty()) ap
+            else {
+                val merged = LinkedHashMap<String, WifiClient>()
+                ap.clients.forEach { merged[it.mac.lowercase()] = it }
+                logged.forEach { client ->
+                    merged.putIfAbsent(client.mac.lowercase(), WifiClient(client.mac, client.rssi, client.role))
+                }
+                ap.copy(clients = merged.values.toList())
+            }
+        }
+    }
+
+    private data class HeardClient(
+        val mac: String,
+        val apBssid: String,
+        val apName: String,
+        val rssi: Int,
+        val role: String
+    )
 
     override fun onCleared() {
         stopScan()

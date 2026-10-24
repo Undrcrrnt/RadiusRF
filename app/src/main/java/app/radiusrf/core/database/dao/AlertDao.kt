@@ -13,6 +13,9 @@ interface AlertDao {
     @Query("SELECT * FROM alerts ORDER BY timestamp DESC LIMIT :limit")
     fun observeRecent(limit: Int = 300): Flow<List<AlertEntity>>
 
+    @Query("SELECT * FROM alerts WHERE status = 'OPEN' ORDER BY timestamp DESC")
+    fun observeOpen(): Flow<List<AlertEntity>>
+
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insert(alert: AlertEntity)
 

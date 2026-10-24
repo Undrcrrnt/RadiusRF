@@ -24,6 +24,7 @@ class QrRepository(
                 contentType = result.contentType.name,
                 parsedContent = result.parsedContent,
                 isThreat = result.isThreat,
+                threatReason = result.threatReason,
                 timestamp = result.timestamp
             )
         )
@@ -39,6 +40,7 @@ class QrRepository(
         contentType = try { QrContentType.valueOf(contentType) } catch (_: Exception) { QrContentType.UNKNOWN },
         parsedContent = parsedContent ?: rawValue,
         isThreat = isThreat,
+        threatReason = threatReason,
         timestamp = timestamp
     )
 }

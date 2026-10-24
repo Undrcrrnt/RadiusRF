@@ -21,6 +21,7 @@ class WifiDirectViewModel @Inject constructor(
     private var receiver: BroadcastReceiver? = null
 
     fun initialize() {
+        if (receiver != null) return
         manager.initialize()
         receiver = manager.registerReceiver()
     }

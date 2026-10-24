@@ -13,6 +13,7 @@ static std::condition_variable g_cv;
 static hackrf_device *g_dev = nullptr;
 static bool g_streaming = false;
 static int g_rate = 0;
+static int64_t g_frequency = 0;
 static std::atomic<bool> g_open{false};
 static uint8_t g_ring[1 << 20];
 static int g_head = 0;
@@ -55,6 +56,7 @@ static void shutdown_device() {
         g_dev = nullptr;
         g_streaming = false;
         g_rate = 0;
+        g_frequency = 0;
         g_open.store(false);
     }
     if (dev != nullptr && streaming) {
@@ -76,6 +78,10 @@ Java_app_radiusrf_features_sdr_domain_NativeHackrf_open(
     hackrf_device *dev = nullptr;
     int result = hackrf_open_by_fd(&dev, fd);
     if (result != HACKRF_SUCCESS || dev == nullptr) {
+        if (dev != nullptr) {
+            hackrf_close(dev);
+        }
+        hackrf_exit();
         return env->NewStringUTF("HackRF did not start");
     }
     std::lock_guard<std::mutex> lock(g_dev_mu);
@@ -86,9 +92,10 @@ Java_app_radiusrf_features_sdr_domain_NativeHackrf_open(
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_app_radiusrf_features_sdr_domain_NativeHackrf_configure(
-        JNIEnv *env, jobject, jlong freq_hz, jint sample_rate, jint lna, jint vga, jint amp) {
+        JNIEnv *env, jobject, jlong freq_hz, jint sample_rate, jint lna, jint vga, jint amp, jint antenna) {
     hackrf_device *dev = nullptr;
     bool restart = false;
+    bool retune = false;
     {
         std::lock_guard<std::mutex> lock(g_dev_mu);
         if (g_dev == nullptr) return env->NewStringUTF("HackRF is not open");
@@ -97,6 +104,7 @@ Java_app_radiusrf_features_sdr_domain_NativeHackrf_configure(
         }
         dev = g_dev;
         restart = g_streaming && sample_rate != g_rate;
+        retune = g_streaming && freq_hz != g_frequency;
     }
     if (restart) {
         hackrf_stop_rx(dev);
@@ -127,8 +135,17 @@ Java_app_radiusrf_features_sdr_domain_NativeHackrf_configure(
     hackrf_set_lna_gain(dev, static_cast<uint32_t>(lna_gain));
     hackrf_set_vga_gain(dev, static_cast<uint32_t>(vga_gain));
     hackrf_set_amp_enable(dev, amp ? 1 : 0);
+    hackrf_set_antenna_enable(dev, antenna ? 1 : 0);
     int result = hackrf_set_freq(dev, static_cast<uint64_t>(freq_hz));
     if (result != HACKRF_SUCCESS) return env->NewStringUTF("Frequency was rejected");
+    {
+        std::lock_guard<std::mutex> lock(g_dev_mu);
+        g_frequency = freq_hz;
+    }
+    if (retune && !restart) {
+        std::lock_guard<std::mutex> lock(g_ring_mu);
+        ring_clear_locked();
+    }
     {
         std::lock_guard<std::mutex> lock(g_dev_mu);
         streaming = g_streaming;

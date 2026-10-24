@@ -57,6 +57,7 @@ import app.radiusrf.core.sessions.ItemKind
 import app.radiusrf.core.sessions.Session
 import app.radiusrf.core.sessions.SessionItem
 import app.radiusrf.features.wifi.domain.WifiAccessPoint
+import app.radiusrf.features.wifi.domain.WifiClient
 import app.radiusrf.features.wifiaware.domain.WifiAwarePeer
 
 /**
@@ -85,6 +86,11 @@ object DemoData {
         const val SIGNAL_LOGGER = "signal_logger"
         const val WARDRIVING = "wardriving"
         const val PROXIMITY_RADAR = "proximity_radar"
+        const val SIGNATURE_WATCH = "signature_watch"
+        const val FTM = "ftm"
+        const val ISM_DECODER = "ism_decoder"
+        const val TRAFFIC_RADIO = "traffic_radio"
+        const val MESHTASTIC = "meshtastic"
         const val CELL_TOWER = "cell_tower"
         const val GPS = "gps"
         const val ALERT_CENTER = "alert_center"
@@ -95,7 +101,8 @@ object DemoData {
         Routes.WIFI, Routes.BLE, Routes.NFC, Routes.IR, Routes.UWB, Routes.WIFI_AWARE, Routes.SDR, Routes.USB_CAMERA,
         Routes.USB, Routes.BLUETOOTH_CLASSIC, Routes.BLUETOOTH_TRACKER, Routes.HIDDEN_CAMERA, Routes.ROGUE_AP,
         Routes.NETWORK_SCANNER, Routes.RF_BUG_SWEEPER, Routes.DEAUTH, Routes.SIGNAL_LOGGER, Routes.WARDRIVING,
-        Routes.PROXIMITY_RADAR, Routes.CELL_TOWER, Routes.GPS, Routes.ALERT_CENTER, Routes.SESSIONS
+        Routes.PROXIMITY_RADAR, Routes.CELL_TOWER, Routes.GPS, Routes.ALERT_CENTER, Routes.SESSIONS,
+        Routes.SIGNATURE_WATCH, Routes.FTM, Routes.ISM_DECODER, Routes.TRAFFIC_RADIO, Routes.MESHTASTIC
     )
 
     private val now: Long get() = System.currentTimeMillis()
@@ -107,7 +114,9 @@ object DemoData {
     // ── WiFi ────────────────────────────────────────────────────────────────
     val wifiAccessPoints: List<WifiAccessPoint> = listOf(
         ap("Home_5G", "A4:2B:B0:11:22:7F", -41, 5180, "[WPA3-SAE-CCMP][ESS]"),
-        ap("CafeGuest", "D8:07:B6:30:44:12", -52, 2437, "[ESS]"),
+        ap("CafeGuest", "D8:07:B6:30:44:12", -52, 2437, "[ESS]").copy(
+            clients = listOf(WifiClient("84:11:22:33:44:55", -48, "Client"))
+        ),
         ap("CafeGuest", "78:8A:20:9A:10:C4", -67, 2437, "[ESS]"),
         ap("OFFICE-2G", "00:1A:2B:77:01:9E", -63, 2462, "[WPA2-PSK-CCMP][ESS]"),
         ap("<Hidden>", "24:0A:C4:55:66:3B", -78, 2412, "[WPA2-PSK-CCMP][ESS]"),
@@ -309,12 +318,13 @@ object DemoData {
     val wardrivingRecords: List<WardrivingRecord> = listOf(
         WardrivingRecord("AA:BB:CC:11:22:33", "HomeNet-5G", -55, 5180, "[WPA2-PSK-CCMP][ESS]", 12.97160, 77.59460, now - 9 * MIN),
         WardrivingRecord("DE:AD:BE:EF:00:01", "HomeNet", -41, 2437, "[ESS]", 12.97162, 77.59463, now - 8 * MIN),
+        WardrivingRecord("84:11:22:33:44:55", "HomeNet", -44, 2437, "de:ad:be:ef:00:01", 12.97162, 77.59463, now - 8 * MIN, radio = "CLIENT"),
         WardrivingRecord("00:1D:7E:AB:CD:EF", "OldRouter", -77, 2462, "[WEP][ESS]", 12.97180, 77.59490, now - 6 * MIN),
         WardrivingRecord("02:11:22:33:44:55", "Starbucks WiFi", -50, 2412, "[ESS]", 12.97210, 77.59520, now - 4 * MIN),
         WardrivingRecord("11:22:33:44:55:66", "Neighbour", -70, 2437, "[WPA3-SAE-CCMP][ESS]", 12.97240, 77.59550, now - 2 * MIN),
         WardrivingRecord("66:55:44:33:22:11", null, -83, 5745, "[WPA2-PSK-CCMP][ESS]", 12.97260, 77.59580, now - MIN)
     )
-    val wardrivingStats = WardrivingStats(totalRecords = 6, uniqueSsids = 5, uniqueBssids = 6, openCount = 2, securedCount = 4, sessionDurationMs = 9 * MIN)
+    val wardrivingStats = WardrivingStats(totalRecords = 7, uniqueSsids = 5, uniqueBssids = 7, openCount = 2, securedCount = 4, sessionDurationMs = 9 * MIN)
 
     // ── Proximity radar ─────────────────────────────────────────────────────
     val radarDevices: List<RadarDevice> = listOf(

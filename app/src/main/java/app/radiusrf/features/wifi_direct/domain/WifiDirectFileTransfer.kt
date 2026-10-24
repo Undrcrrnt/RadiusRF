@@ -54,6 +54,8 @@ class WifiDirectFileTransfer(private val context: Context) {
         const val PORT = 8988
         const val BUFFER_SIZE = 8192
         private const val SOCKET_TIMEOUT = 15_000
+        private const val MAX_FILENAME_BYTES = 4_096
+        private const val MAX_FILE_SIZE = 4L * 1024 * 1024 * 1024
     }
 
     private val _progress = MutableStateFlow(TransferProgress(TransferState.Idle))
@@ -76,6 +78,7 @@ class WifiDirectFileTransfer(private val context: Context) {
             serverSocket = server
 
             val socket = server.accept()
+            socket.soTimeout = SOCKET_TIMEOUT
             clientSocket = socket
 
             _progress.value = TransferProgress(TransferState.Connecting)
@@ -84,10 +87,14 @@ class WifiDirectFileTransfer(private val context: Context) {
 
             // Read header: [4 bytes name length][name bytes][8 bytes file size]
             val nameLength = input.readInt()
+            require(nameLength in 1..MAX_FILENAME_BYTES) { "Invalid file name length" }
             val nameBytes = ByteArray(nameLength)
             input.readFully(nameBytes)
-            val fileName = String(nameBytes, Charsets.UTF_8)
+            val suppliedName = String(nameBytes, Charsets.UTF_8)
+            val fileName = File(suppliedName).name
+            require(fileName.isNotBlank() && fileName != "." && fileName != "..") { "Invalid file name" }
             val fileSize = input.readLong()
+            require(fileSize in 0..MAX_FILE_SIZE) { "File is too large" }
 
             _progress.value = TransferProgress(
                 state = TransferState.Transferring,
@@ -99,6 +106,7 @@ class WifiDirectFileTransfer(private val context: Context) {
             val downloadsDir = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
                 ?: throw IllegalStateException("Downloads directory unavailable")
             if (!downloadsDir.exists()) downloadsDir.mkdirs()
+            require(fileSize <= downloadsDir.usableSpace) { "Not enough storage space" }
 
             val outputFile = generateUniqueFile(downloadsDir, fileName)
             val outputStream = FileOutputStream(outputFile)
@@ -181,6 +189,11 @@ class WifiDirectFileTransfer(private val context: Context) {
             }
         } finally {
             closeServerSocket()
+            try {
+                clientSocket?.close()
+            } catch (_: Exception) {
+            }
+            clientSocket = null
         }
     }
 
@@ -335,6 +348,8 @@ class WifiDirectFileTransfer(private val context: Context) {
 
     private fun generateUniqueFile(directory: File, fileName: String): File {
         var file = File(directory, fileName)
+        val root = directory.canonicalFile
+        require(file.canonicalFile.parentFile == root) { "Invalid destination path" }
         if (!file.exists()) return file
 
         val dotIndex = fileName.lastIndexOf('.')
@@ -344,6 +359,7 @@ class WifiDirectFileTransfer(private val context: Context) {
         var counter = 1
         while (file.exists()) {
             file = File(directory, "${baseName}_($counter)$extension")
+            require(file.canonicalFile.parentFile == root) { "Invalid destination path" }
             counter++
         }
         return file

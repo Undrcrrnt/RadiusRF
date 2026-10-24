@@ -66,7 +66,9 @@ object ScanBackground {
         try {
             context.startForegroundService(intent)
         } catch (_: Exception) {
-            // Android 12+ rejects a foreground start from the background. The scan is already running.
+            enabled = false
+            holders.clear()
+            needsMic = false
         }
     }
 }

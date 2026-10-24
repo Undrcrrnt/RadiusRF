@@ -9,7 +9,7 @@ import kotlinx.coroutines.flow.Flow
 @Dao
 interface WardrivingDao {
 
-    @Query("SELECT * FROM wardriving_records WHERE sessionId = :sessionId ORDER BY timestamp DESC")
+    @Query("SELECT * FROM wardriving_records WHERE sessionId = :sessionId ORDER BY timestamp ASC")
     fun getRecordsBySession(sessionId: String): Flow<List<WardrivingRecordEntity>>
 
     @Query("SELECT * FROM wardriving_records ORDER BY timestamp DESC")
@@ -21,9 +21,15 @@ interface WardrivingDao {
     @Insert
     suspend fun insert(record: WardrivingRecordEntity)
 
+    @Insert
+    suspend fun insertAll(records: List<WardrivingRecordEntity>)
+
     @Query("SELECT * FROM wardriving_records WHERE sessionId = :sessionId")
     suspend fun getRecordsBySessionList(sessionId: String): List<WardrivingRecordEntity>
 
     @Query("DELETE FROM wardriving_records WHERE sessionId = :sessionId")
     suspend fun deleteSession(sessionId: String)
+
+    @Query("DELETE FROM wardriving_records WHERE timestamp < :cutoff")
+    suspend fun deleteOlderThan(cutoff: Long)
 }

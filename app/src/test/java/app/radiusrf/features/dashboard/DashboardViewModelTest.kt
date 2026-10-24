@@ -9,6 +9,7 @@ import app.radiusrf.core.hardware.HardwareChecker
 import app.radiusrf.core.prefs.LastUsedFeature
 import app.radiusrf.core.prefs.ToolPreferences
 import app.radiusrf.core.testing.MainDispatcherRule
+import app.radiusrf.navigation.ToolCatalog
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
@@ -154,7 +155,7 @@ class DashboardViewModelTest {
 
         val support = vm().toolSupport
 
-        assertEquals(28, support.total)
+        assertEquals(ToolCatalog.tools.size, support.total)
         assertTrue(support.supported < support.total)
         assertTrue("no IR blaster" in support.missing)
         assertTrue("no UWB" in support.missing)

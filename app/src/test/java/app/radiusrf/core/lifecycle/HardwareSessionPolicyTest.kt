@@ -97,6 +97,6 @@ class HardwareSessionPolicyTest {
         assertEquals(HardwareSessionAction.NONE, policy.onBackground(isActive = true, keepInBackground = true))
         assertFalse(policy.isPausedByLifecycle)
         assertEquals(HardwareSessionAction.NONE, policy.onForeground())
-        assertEquals(HardwareSessionAction.NONE, policy.onDispose(keepInBackground = true))
+        assertEquals(HardwareSessionAction.STOP, policy.onDispose(keepInBackground = true))
     }
 }

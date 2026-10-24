@@ -62,6 +62,7 @@ import app.radiusrf.features.sweep.domain.CheckState
 import app.radiusrf.features.sweep.domain.FindingLevel
 import app.radiusrf.features.sweep.domain.SweepFinding
 import app.radiusrf.features.sweep.domain.SweepPreset
+import app.radiusrf.features.sweep.viewmodel.MagneticPhase
 import app.radiusrf.features.sweep.viewmodel.SweepPhase
 import app.radiusrf.features.sweep.viewmodel.SweepUiState
 import app.radiusrf.features.sweep.viewmodel.SweepViewModel
@@ -236,12 +237,29 @@ private fun SweepRunning(state: SweepUiState, viewModel: SweepViewModel) {
                 }
             }
         }
-        Row(
+        Column(
             Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            ZdButton("Skip check", onClick = viewModel::skipCurrent, variant = ZdButtonVariant.Secondary, modifier = Modifier.weight(1f))
-            ZdButton("Stop", onClick = viewModel::stop, variant = ZdButtonVariant.Danger, icon = ZdIcons.Stop, modifier = Modifier.weight(1f))
+            when (state.magneticPhase) {
+                MagneticPhase.READY -> ZdButton(
+                    "Start magnetic scan",
+                    onClick = viewModel::startMagnetic,
+                    icon = ZdIcons.Play,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                MagneticPhase.WALKING -> ZdButton(
+                    "Complete magnetic scan",
+                    onClick = viewModel::completeMagnetic,
+                    icon = ZdIcons.Check,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                MagneticPhase.IDLE -> Unit
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                ZdButton("Skip check", onClick = viewModel::skipCurrent, variant = ZdButtonVariant.Secondary, modifier = Modifier.weight(1f))
+                ZdButton("Stop", onClick = viewModel::stop, variant = ZdButtonVariant.Danger, icon = ZdIcons.Stop, modifier = Modifier.weight(1f))
+            }
         }
     }
 }

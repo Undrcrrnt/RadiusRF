@@ -9,9 +9,11 @@ import androidx.core.content.FileProvider
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
-import java.text.SimpleDateFormat
-import java.util.Date
 import java.util.Locale
+import java.time.Instant
+import java.time.ZoneId
+import java.time.ZoneOffset
+import java.time.format.DateTimeFormatter
 
 enum class ExportFormat(val label: String, val description: String, val extension: String, val mime: String) {
     PDF("PDF report", "Readable summary with findings and advice", "pdf", "application/pdf"),
@@ -29,8 +31,8 @@ data class SessionExport(val session: Session, val items: List<SessionItem>)
 object SessionExporter {
 
     private val MAC = Regex("""\b([0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){2})(?::[0-9A-Fa-f]{2}){3}\b""")
-    private val isoTime = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US)
-    private val readableTime = SimpleDateFormat("EEE d MMM yyyy, HH:mm", Locale.US)
+    private val isoTime = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss", Locale.US).withZone(ZoneOffset.UTC)
+    private val readableTime = DateTimeFormatter.ofPattern("EEE d MMM yyyy, HH:mm", Locale.US).withZone(ZoneId.systemDefault())
 
     /** Keeps the vendor prefix of every MAC address in [text] and hides the device-specific half. */
     fun redactMacs(text: String): String = MAC.replace(text) { "${it.groupValues[1]}:XX:XX:XX" }
@@ -48,8 +50,8 @@ object SessionExporter {
                             .put("tool", s.tool)
                             .put("title", s.title)
                             .put("place", s.place ?: JSONObject.NULL)
-                            .put("startedAt", isoTime.format(Date(s.startedAt)))
-                            .put("endedAt", isoTime.format(Date(s.endedAt)))
+                            .put("startedAt", isoTime.format(Instant.ofEpochMilli(s.startedAt)))
+                            .put("endedAt", isoTime.format(Instant.ofEpochMilli(s.endedAt)))
                             .put("summary", clean(s.summary))
                             .put("findings", s.findingCount)
                             .put("items", JSONArray().apply {
@@ -79,7 +81,7 @@ object SessionExporter {
                 listOf(
                     s.title,
                     s.tool,
-                    isoTime.format(Date(s.startedAt)),
+                    isoTime.format(Instant.ofEpochMilli(s.startedAt)),
                     i.kind.name,
                     clean(i.key),
                     clean(i.label),
@@ -97,7 +99,9 @@ object SessionExporter {
         if (value.any { it == ',' || it == '"' || it == '\n' }) "\"" + value.replace("\"", "\"\"") + "\"" else value
 
     fun fileName(exports: List<SessionExport>, format: ExportFormat): String {
-        val stamp = SimpleDateFormat("yyyyMMdd_HHmm", Locale.US).format(Date(exports.maxOfOrNull { it.session.startedAt } ?: 0L))
+        val stamp = DateTimeFormatter.ofPattern("yyyyMMdd_HHmm", Locale.US)
+            .withZone(ZoneId.systemDefault())
+            .format(Instant.ofEpochMilli(exports.maxOfOrNull { it.session.startedAt } ?: 0L))
         val what = if (exports.size == 1) exports.first().session.tool else "${exports.size}_sessions"
         return "RadiusRF_${what}_$stamp.${format.extension}"
     }
@@ -142,10 +146,10 @@ object SessionExporter {
         }
 
         line("RadiusRF report", title, 4f)
-        line("Generated ${readableTime.format(Date())} · ${exports.size} session(s)" + if (redact) " · MACs redacted" else "", body, 14f)
+        line("Generated ${readableTime.format(Instant.now())} · ${exports.size} session(s)" + if (redact) " · MACs redacted" else "", body, 14f)
         exports.forEach { (s, items) ->
             line("${s.title}${s.place?.let { " · $it" } ?: ""}", heading, 2f)
-            line("${readableTime.format(Date(s.startedAt))} · ${items.size} items · ${s.findingCount} findings", body, 2f)
+            line("${readableTime.format(Instant.ofEpochMilli(s.startedAt))} · ${items.size} items · ${s.findingCount} findings", body, 2f)
             line(clean(s.summary), body, 8f)
             items.filter { it.flagged }.forEach { line("! ${clean(it.label)} — ${clean(it.detail)}", flag, 3f) }
             items.filterNot { it.flagged }.forEach { i ->

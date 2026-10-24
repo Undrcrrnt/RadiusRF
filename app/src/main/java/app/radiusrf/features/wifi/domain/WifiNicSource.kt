@@ -9,13 +9,15 @@ import kotlinx.coroutines.flow.asStateFlow
 import javax.inject.Inject
 import javax.inject.Singleton
 
-enum class WifiNicSource(val label: String, val kind: RadioKind?) {
-    PHONE("Phone", null),
-    T2U_PLUS("8821AU", RadioKind.T2U_PLUS),
-    RTL8812AU("8812AU", RadioKind.RTL8812AU),
-    RTL8814AU("8814AU", RadioKind.RTL8814AU),
-    PAU0A("PAU0A", RadioKind.PAU0A),
-    MT7612U("7612U", RadioKind.MT7612U)
+enum class WifiNicSource(val adapter: String, val chipset: String, val kind: RadioKind?) {
+    PHONE("Phone", "Built-in radio", null),
+    T2U_PLUS("Archer T2U Plus", "RTL8821AU", RadioKind.T2U_PLUS),
+    RTL8812AU("Alfa", "RTL8812AU", RadioKind.RTL8812AU),
+    RTL8814AU("Alfa AWUS1900", "RTL8814AU", RadioKind.RTL8814AU),
+    PAU0A("Panda PAU0A", "MT7610U", RadioKind.PAU0A),
+    MT7612U("MediaTek", "MT7612U", RadioKind.MT7612U);
+
+    val label: String get() = if (kind == null) adapter else "$adapter · $chipset"
 }
 
 @Singleton

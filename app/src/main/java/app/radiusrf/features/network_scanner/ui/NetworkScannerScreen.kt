@@ -156,6 +156,19 @@ private fun NetworkScannerContent(viewModel: NetworkScannerViewModel) {
                     }
                 }
             }
+            if (state.announced.isNotEmpty()) {
+                item { ZdSectionLabel("Announced", trailingText = "${state.announced.size}") }
+                item {
+                    ZdListCard(state.announced) { service ->
+                        ZdListRow(
+                            title = service.name,
+                            subtitle = listOfNotNull(service.kind, service.protocol, service.ip, service.port?.let { ":$it" }, service.detail.takeIf { it.isNotBlank() }).joinToString(" · "),
+                            leading = { ZdIconTile(ZdIcons.Lan, size = 36.dp) },
+                            trailing = { ZdTag(service.protocol) }
+                        )
+                    }
+                }
+            }
             item {
                 ZdListCard(shown) { device ->
                     ZdListRow(

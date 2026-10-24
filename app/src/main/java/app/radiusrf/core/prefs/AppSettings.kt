@@ -38,6 +38,14 @@ class AppSettings @Inject constructor(
     /** Lock-screen notifications say only "Possible tracker nearby" until unlocked. */
     val hideOnLockScreen: StateFlow<Boolean> = _hideOnLockScreen.asStateFlow()
 
+    private val _offlineTilesOnly = MutableStateFlow(prefs.getBoolean(KEY_MAP_OFFLINE, false))
+    /** When true, street maps never download tiles. Imported archives and the local cache still show. */
+    val offlineTilesOnly: StateFlow<Boolean> = _offlineTilesOnly.asStateFlow()
+
+    private val _activeMapArchive = MutableStateFlow(prefs.getString(KEY_MAP_ARCHIVE, null))
+    /** File name of the tile archive last imported or selected. */
+    val activeMapArchive: StateFlow<String?> = _activeMapArchive.asStateFlow()
+
     private val _myDevices = MutableStateFlow(prefs.getStringSet(KEY_MY_DEVICES, emptySet()).orEmpty().toSet())
     /** Bluetooth addresses marked "It's mine"; watch rules ignore them. */
     val myDevices: StateFlow<Set<String>> = _myDevices.asStateFlow()
@@ -81,6 +89,18 @@ class AppSettings @Inject constructor(
         _myDevices.value = next
     }
 
+    fun setOfflineTilesOnly(on: Boolean) {
+        prefs.edit { putBoolean(KEY_MAP_OFFLINE, on) }
+        _offlineTilesOnly.value = on
+    }
+
+    fun setActiveMapArchive(name: String?) {
+        prefs.edit {
+            if (name.isNullOrBlank()) remove(KEY_MAP_ARCHIVE) else putString(KEY_MAP_ARCHIVE, name)
+        }
+        _activeMapArchive.value = name
+    }
+
     fun forgetMine(address: String) {
         val next = _myDevices.value - address.uppercase()
         prefs.edit { putStringSet(KEY_MY_DEVICES, next) }
@@ -95,6 +115,8 @@ class AppSettings @Inject constructor(
         const val KEY_ONBOARDED = "onboarding_done"
         const val KEY_LOCK_PRIVATE = "hide_on_lock_screen"
         const val KEY_MY_DEVICES = "my_devices"
+        const val KEY_MAP_OFFLINE = "map_offline_tiles_only"
+        const val KEY_MAP_ARCHIVE = "map_active_archive"
         val RETENTION_CHOICES = listOf(7, 30, 90)
     }
 }

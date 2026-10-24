@@ -38,6 +38,7 @@ class PrivacyScoreViewModel @Inject constructor(
     @ApplicationContext private val context: Context
 ) : ViewModel() {
 
+    private val sensorOwner = Any()
     private val _state = MutableStateFlow(PrivacyScoreState())
     val state: StateFlow<PrivacyScoreState> = _state.asStateFlow()
 
@@ -111,7 +112,7 @@ class PrivacyScoreViewModel @Inject constructor(
                 updateState(allChecks)
 
                 // ── Phase 5: Physical Checks ────────────────────────────
-                sensorDataCollector.start()
+                sensorDataCollector.start(sensorOwner)
                 delay(500) // Let sensors warm up
 
                 val magReading = sensorDataCollector.magnetometer.value
@@ -124,7 +125,7 @@ class PrivacyScoreViewModel @Inject constructor(
                 allChecks += PrivacyScoreCalculator.checkUltrasonicBeacons(hasAudioPerm)
                 updateState(allChecks)
 
-                sensorDataCollector.stop()
+                sensorDataCollector.stop(sensorOwner)
 
                 // ── Finalize ────────────────────────────────────────────
                 val score = PrivacyScoreCalculator.calculateScore(allChecks)
@@ -213,7 +214,7 @@ class PrivacyScoreViewModel @Inject constructor(
         if (!_state.value.isScanning) return
         scanJob?.cancel()
         scanJob = null
-        sensorDataCollector.stop()
+        sensorDataCollector.stop(sensorOwner)
         _state.value = _state.value.copy(isScanning = false, isPaused = true)
     }
 
@@ -222,7 +223,7 @@ class PrivacyScoreViewModel @Inject constructor(
     fun stopScan() {
         scanJob?.cancel()
         scanJob = null
-        sensorDataCollector.stop()
+        sensorDataCollector.stop(sensorOwner)
         _state.value = _state.value.copy(isScanning = false, isPaused = false)
     }
 

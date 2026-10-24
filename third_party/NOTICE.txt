@@ -12,3 +12,33 @@ https://github.com/libusb/libusb
 A binary that links devourer must be distributed under GPL-2.0 and must
 include corresponding source. Empty Set uses devourer only as a receive path.
 Transmit and packet-injection APIs are not called.
+
+Airspy host code (BSD) is vendored in third_party/airspy. The IQ converter
+compiled with it is the MIT version from the HydraSDR tree. The newer Airspy
+converter that limits redistribution to the Airspy ecosystem is not included.
+Do not use the Airspy name to endorse this app.
+
+https://github.com/airspy/airspyone_host
+
+Airspy HF+ host code (BSD) is vendored in third_party/airspyhf. Do not use the
+Airspy HF+ name to endorse this app.
+
+https://github.com/airspy/airspyhf
+
+HydraSDR host code (BSD) is vendored in third_party/hydrasdr. Do not use the
+HydraSDR name to endorse this app.
+
+https://github.com/hydrasdr/hydrasdr_host
+
+osmdroid (Apache License 2.0) renders OpenStreetMap tiles in the signal-location
+views. OpenStreetMap data is © OpenStreetMap contributors and is displayed with
+on-map attribution.
+
+https://github.com/osmdroid/osmdroid
+https://www.openstreetmap.org/copyright
+
+The signal heat-cloud interaction was informed by Fieldwatch 1.1.31
+(MIT License), Copyright (c) 2026 Off Grid Pete LLC. RadiusRF uses its own
+location and rendering implementation.
+
+https://github.com/OffGridPete/Fieldwatch

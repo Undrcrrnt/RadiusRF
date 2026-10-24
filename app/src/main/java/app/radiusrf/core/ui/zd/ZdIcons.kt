@@ -64,6 +64,7 @@ object ZdIcons {
     val Play by lazy { stroke("Play", "M7 5l12 7-12 7z", width = 2.2f) }
     val Stop by lazy { stroke("Stop", "M7 7h10v10H7z", width = 2.2f) }
     val Pause by lazy { stroke("Pause", "M8 5v14M16 5v14", width = 2.2f) }
+    val Background by lazy { stroke("Background", "M4 8h11v10H4zM9 5h11v10") }
 
     // Status and severity
     val Warning by lazy { stroke("Warning", "M12 3l10 18H2L12 3zM12 10v5M12 18h.01", width = 2f) }
@@ -95,4 +96,5 @@ object ZdIcons {
     val Speaker by lazy { stroke("Speaker", "M6 4h12v16H6zM12 14a2.5 2.5 0 1 0 0 .01M12 7.5h.01") }
     val Gauge by lazy { stroke("Gauge", "M4 16a8 8 0 1 1 16 0M12 16l4-5") }
     val Volume by lazy { stroke("Volume", "M4 9h4l5-4v14l-5-4H4zM16 9a4 4 0 0 1 0 6M19 6a8 8 0 0 1 0 12") }
+    val VolumeOff by lazy { stroke("VolumeOff", "M4 9h4l5-4v14l-5-4H4zM16 9l6 6M22 9l-6 6") }
 }

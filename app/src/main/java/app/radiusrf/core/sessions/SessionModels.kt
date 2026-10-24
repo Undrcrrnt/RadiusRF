@@ -1,7 +1,7 @@
 package app.radiusrf.core.sessions
 
 /** What kind of thing a session item is; drives its tag and grouping. */
-enum class ItemKind { WIFI, BLE, BT, LAN, CAMERA, TRACKER, RF }
+enum class ItemKind { WIFI, BLE, BT, LAN, CAMERA, TRACKER, RF, CLIENT }
 
 data class SessionItem(
     val key: String,

@@ -21,19 +21,19 @@ enum class SweepPreset(
         "Full room sweep",
         "Everything below. Best for hotels and rentals.",
         SweepCheck.entries.toList(),
-        "~2 min"
+        "~50 s, then you walk the magnetic scan"
     ),
     HIDDEN_CAMERA(
         "Hidden camera",
         "WiFi makers and names, BLE signatures and magnetic sweep.",
         listOf(SweepCheck.CAMERAS, SweepCheck.WIFI, SweepCheck.MAGNETIC),
-        "~60 s"
+        "~30 s, then you walk the magnetic scan"
     ),
     RF_BUG(
         "RF bug sweep",
         "Radio modules (HC-05, ESP32, nRF), ultrasonic and magnetic.",
         listOf(SweepCheck.TRACKERS, SweepCheck.ULTRASONIC, SweepCheck.MAGNETIC),
-        "~80 s"
+        "~50 s, then you walk the magnetic scan"
     ),
     TRACKER_CHECK(
         "Tracker check",

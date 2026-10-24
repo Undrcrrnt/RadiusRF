@@ -16,10 +16,19 @@ class WardrivingSessionState @Inject constructor() {
     private val _active = MutableStateFlow<ActiveSession?>(null)
     val active: StateFlow<ActiveSession?> = _active
 
+    private val _failure = MutableStateFlow<String?>(null)
+    val failure: StateFlow<String?> = _failure
+
     fun start(sessionId: String, mode: SurveyMode): Long {
+        _failure.value = null
         val startTime = System.currentTimeMillis()
         _active.value = ActiveSession(sessionId, startTime, mode)
         return startTime
+    }
+
+    fun fail(message: String) {
+        _failure.value = message
+        stop()
     }
 
     fun pause() {

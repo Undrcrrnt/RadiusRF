@@ -36,6 +36,7 @@ class RfBugSweeperViewModel @Inject constructor(
     private val demoBus: DemoDataBus
 ) : ViewModel() {
 
+    private val sensorOwner = Any()
     /** When the current run started; null when no run is in progress. */
     private var runStartedAt: Long? = null
 
@@ -85,7 +86,7 @@ class RfBugSweeperViewModel @Inject constructor(
     fun pauseSweep() {
         if (!_state.value.isSweeping) return
         cancelSweepJobs()
-        sensorDataCollector.stop()
+        sensorDataCollector.stop(sensorOwner)
         _state.value = _state.value.copy(isSweeping = false, isPaused = true)
     }
 
@@ -121,7 +122,7 @@ class RfBugSweeperViewModel @Inject constructor(
             recordSession(started)
         }
         cancelSweepJobs()
-        sensorDataCollector.stop()
+        sensorDataCollector.stop(sensorOwner)
         metalDetector.reset()
 
         _state.value = _state.value.copy(
@@ -209,7 +210,7 @@ class RfBugSweeperViewModel @Inject constructor(
 
     private fun startMagneticSweep() {
         magneticJob?.cancel()
-        sensorDataCollector.start()
+        sensorDataCollector.start(sensorOwner)
         magneticJob = viewModelScope.launch {
             sensorDataCollector.magnetometer.collect { reading ->
                 if (!reading.isAvailable || reading.values.isEmpty()) return@collect

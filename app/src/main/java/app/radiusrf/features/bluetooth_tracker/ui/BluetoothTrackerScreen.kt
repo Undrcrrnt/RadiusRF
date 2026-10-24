@@ -81,7 +81,7 @@ private fun BluetoothTrackerContent(viewModel: BluetoothTrackerViewModel, onOpen
             onPause = viewModel::pauseScan,
             onResume = viewModel::resumeScan,
             onStop = viewModel::stopScan,
-            runningNote = "Find My, Tile, Chipolo · ${state.totalDevicesScanned} devices checked",
+            runningNote = "Find My, Find Hub, Tile, Chipolo · ${state.totalDevicesScanned} devices checked",
             idleNote = if (state.trackers.isEmpty()) "Keep it running while you move" else "Results kept"
         )
 

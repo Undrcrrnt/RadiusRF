@@ -62,8 +62,6 @@ import app.radiusrf.features.wifi.viewmodel.WifiViewModel
 import app.radiusrf.ui.theme.ZdColors
 import app.radiusrf.ui.theme.ZdType
 
-private const val AUTO_STOP_MS = 30_000L
-
 private enum class NetworkFilter(val label: String) { ALL("All"), BAND_24("2.4 GHz"), BAND_5("5 GHz"), WEAK("Weak security") }
 
 @Composable
@@ -108,11 +106,11 @@ private fun WifiContent(viewModel: WifiViewModel, onLocate: (WifiAccessPoint) ->
             onPause = viewModel::pauseScan,
             onResume = viewModel::resumeScan,
             onStop = viewModel::stopScan,
-            autoStopMs = AUTO_STOP_MS,
             backgroundLabel = "Wi-Fi scan",
             onBackgroundChange = viewModel::setRunInBackground,
+            compactControls = true,
             idleNote = if (nic == WifiNicSource.PHONE) {
-                if (accessPoints.isEmpty()) "Phone radio · 30 s" else "Results kept"
+                if (accessPoints.isEmpty()) "Phone radio" else "Results kept"
             } else {
                 "${nic.label} · beacons"
             }
@@ -184,17 +182,26 @@ private fun LazyListScope.networksTab(
     onOpen: (WifiAccessPoint) -> Unit
 ) {
     item {
-        val load = WifiAssessment.load(sorted, WifiAssessment.CHANNELS_24)
+        val five = filter == NetworkFilter.BAND_5
+        val bandPoints = sorted.filter { it.band == if (five) WifiBand.BAND_5GHZ else WifiBand.BAND_2_4GHZ }
+        val channels = if (five) WifiAssessment.CHANNELS_5 else WifiAssessment.CHANNELS_24
+        val title = if (five) "5 GHz congestion" else "2.4 GHz congestion"
+        val load = WifiAssessment.load(bandPoints, channels)
+        val best = if (five) {
+            if (bandPoints.isEmpty()) null else channels.minByOrNull { channel -> bandPoints.count { it.channel == channel } }
+        } else {
+            WifiAssessment.best24Channel(sorted)
+        }
         ZdCard(verticalSpacing = 8.dp, contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("2.4 GHz congestion", style = ZdType.Mono.copy(fontWeight = ZdType.Label.fontWeight), color = ZdColors.Text2, modifier = Modifier.weight(1f))
-                WifiAssessment.best24Channel(sorted)?.let {
+                Text(title, style = ZdType.Mono.copy(fontWeight = ZdType.Label.fontWeight), color = ZdColors.Text2, modifier = Modifier.weight(1f))
+                best?.let {
                     Text("best: ch $it", style = ZdType.Mono.copy(fontWeight = ZdType.Label.fontWeight), color = ZdColors.Accent)
                 }
             }
             ZdBarChart(
                 bars = load.map { ZdBar(it.channel.toString(), it.networks.toFloat(), congestionColor(it.networks)) },
-                contentDescription = "Networks per 2.4 GHz channel"
+                contentDescription = "Networks per ${if (five) "5" else "2.4"} GHz channel"
             )
         }
     }
@@ -235,7 +242,10 @@ private fun LazyListScope.networksTab(
                 NetworkLayout.COMPACT -> ZdListCard(shown) { ap ->
                     ZdListRow(
                         title = WifiAssessment.displayName(ap),
-                        subtitle = "Access point · ${ap.bssid} · ${ap.rssi} dBm · ch ${ap.channel}",
+                        subtitle = buildString {
+                            append("Access point · ${ap.bssid} · ${ap.rssi} dBm · ch ${ap.channel}")
+                            if (ap.clients.isNotEmpty()) append(" · ${clientLine(ap)}")
+                        },
                         onClick = { onOpen(ap) }
                     )
                 }
@@ -353,6 +363,12 @@ private fun LazyListScope.securityTab(
     }
 }
 
+private fun clientLine(ap: WifiAccessPoint): String {
+    val shown = ap.clients.take(3).joinToString(" · ") { it.mac }
+    val extra = ap.clients.size - 3
+    return if (extra > 0) "Clients $shown · +$extra" else "Clients $shown"
+}
+
 @Composable
 private fun NetworkRow(ap: WifiAccessPoint, all: List<WifiAccessPoint>, onClick: () -> Unit) {
     val twin = !WifiAssessment.isHidden(ap) && all.any {
@@ -368,6 +384,9 @@ private fun NetworkRow(ap: WifiAccessPoint, all: List<WifiAccessPoint>, onClick:
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                     SecurityTag(ap.security)
                     Text("ch ${ap.channel} · ${WifiAssessment.hardwareLabel(ap.bssid)}", style = ZdType.Caption, color = ZdColors.Text3)
+                }
+                if (ap.clients.isNotEmpty()) {
+                    Text(clientLine(ap), style = ZdType.Caption, color = ZdColors.Text2)
                 }
                 if (twin) {
                     ZdTag("Same name, other hardware", color = ZdColors.Medium, background = ZdColors.MediumBg, border = ZdColors.MediumBorder)

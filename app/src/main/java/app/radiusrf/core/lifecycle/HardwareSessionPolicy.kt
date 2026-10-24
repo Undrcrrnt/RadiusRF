@@ -56,9 +56,8 @@ class HardwareSessionPolicy(private val resumeOnForeground: Boolean = true) {
     }
 
     /** Called when the screen leaves composition. Always releases hardware. */
-    fun onDispose(keepInBackground: Boolean = false): HardwareSessionAction {
+    fun onDispose(@Suppress("UNUSED_PARAMETER") keepInBackground: Boolean = false): HardwareSessionAction {
         isPausedByLifecycle = false
-        if (keepInBackground) return HardwareSessionAction.NONE
         return HardwareSessionAction.STOP
     }
 

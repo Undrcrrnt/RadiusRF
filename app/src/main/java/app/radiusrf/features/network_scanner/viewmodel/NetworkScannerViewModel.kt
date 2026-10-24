@@ -4,6 +4,8 @@ import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.radiusrf.features.network_scanner.domain.NetworkScanState
+import app.radiusrf.features.network_scanner.domain.LanAnnouncer
+import app.radiusrf.features.network_scanner.domain.LanService
 import app.radiusrf.features.network_scanner.domain.NetworkVulnerabilityScanner
 import app.radiusrf.features.network_scanner.domain.VulnerabilityLevel
 import app.radiusrf.core.sessions.ItemKind
@@ -64,6 +66,10 @@ class NetworkScannerViewModel @Inject constructor(
             }
 
             try {
+                val announcedJob = launch {
+                    val found = runCatching { LanAnnouncer(appContext).discover() }.getOrDefault(emptyList())
+                    _state.value = _state.value.copy(announced = found)
+                }
                 val devices = scanner.scanNetwork(subnet) { progress, phase ->
                     _state.value = _state.value.copy(
                         progress = progress,
@@ -71,6 +77,7 @@ class NetworkScannerViewModel @Inject constructor(
                         currentIp = if (progress < 1f) "$subnet.*" else null
                     )
                 }
+                announcedJob.join()
 
                 val totalVulns = devices.sumOf { it.vulnerabilities.size }
                 val criticalCount = devices.sumOf { device ->
@@ -209,7 +216,12 @@ class NetworkScannerViewModel @Inject constructor(
             totalVulnerabilities = demo.sumOf { it.vulnerabilities.size },
             criticalCount = demo.sumOf { d -> d.vulnerabilities.count { it.level == VulnerabilityLevel.CRITICAL } },
             scanPhase = "Complete",
-            error = null
+            error = null,
+            announced = listOf(
+                LanService("Living Room TV", "Cast / TV", "mDNS", "chromecast.lan", "192.168.1.24", 8009, "_googlecast._tcp"),
+                LanService("Office Printer", "Printer", "mDNS", "printer.lan", "192.168.1.30", 631, "_ipp._tcp"),
+                LanService("urn:schemas-upnp-org:device:MediaServer:1", "Gateway", "SSDP", "192.168.1.1", "192.168.1.1", 8200, "Linux/3.0 UPnP/1.0")
+            )
         )
     }
 }

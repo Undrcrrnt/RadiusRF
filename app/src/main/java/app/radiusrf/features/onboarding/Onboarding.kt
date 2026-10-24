@@ -101,7 +101,7 @@ fun OnboardingScreen(viewModel: OnboardingViewModel = hiltViewModel()) {
                     .padding(top = 32.dp, bottom = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Text("le:~/welcome", style = ZdType.Path, color = ZdColors.Accent)
+                Text("Radius:~/welcome", style = ZdType.Path, color = ZdColors.Accent)
                 Text("What brings you here?", style = ZdType.Title, color = ZdColors.Text)
                 Text(
                     "Pick any that apply. We’ll pin the right tools to Home; you can change them any time.",

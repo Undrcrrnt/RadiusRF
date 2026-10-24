@@ -194,6 +194,8 @@ Java_com_emptyset_detector_radio_NativeRx_nativeStart(
             if (g_running) {
                 return env->NewStringUTF("native RX already running");
             }
+            g_radio.reset();
+            close_usb_locked();
         }
         if (fd < 0) {
             return env->NewStringUTF("invalid USB file descriptor");
@@ -207,6 +209,15 @@ Java_com_emptyset_detector_radio_NativeRx_nativeStart(
             g_sink = nullptr;
         }
         g_sink = env->NewGlobalRef(sink);
+        auto fail_start = [&](const char *message) -> jstring {
+            g_radio.reset();
+            close_usb_locked();
+            if (g_sink != nullptr) {
+                env->DeleteGlobalRef(g_sink);
+                g_sink = nullptr;
+            }
+            return env->NewStringUTF(message);
+        };
         jclass sink_cls = env->GetObjectClass(sink);
         g_on_frame = env->GetMethodID(sink_cls, "onFrame", "([BII)V");
         g_on_error = env->GetMethodID(sink_cls, "onNativeError", "(Ljava/lang/String;)V");
@@ -214,7 +225,7 @@ Java_com_emptyset_detector_radio_NativeRx_nativeStart(
         env->DeleteLocalRef(sink_cls);
         if (g_on_frame == nullptr || g_on_error == nullptr || g_on_ready == nullptr) {
             env->ExceptionClear();
-            return env->NewStringUTF("JNI sink methods missing");
+            return fail_start("JNI sink methods missing");
         }
 
         std::string lock_path;
@@ -230,7 +241,7 @@ Java_com_emptyset_detector_radio_NativeRx_nativeStart(
         int r = libusb_init(&g_ctx);
         if (r < 0 || g_ctx == nullptr) {
             g_ctx = nullptr;
-            return env->NewStringUTF("libusb_init failed");
+            return fail_start("libusb_init failed");
         }
 
         r = libusb_wrap_sys_device(g_ctx, static_cast<intptr_t>(fd), &g_handle);
@@ -238,7 +249,7 @@ Java_com_emptyset_detector_radio_NativeRx_nativeStart(
             libusb_exit(g_ctx);
             g_ctx = nullptr;
             g_handle = nullptr;
-            return env->NewStringUTF("libusb_wrap_sys_device failed");
+            return fail_start("libusb_wrap_sys_device failed");
         }
         libusb_set_auto_detach_kernel_driver(g_handle, 1);
 
@@ -250,8 +261,7 @@ Java_com_emptyset_detector_radio_NativeRx_nativeStart(
         r = devourer::claim_interface_then_reset(
             g_handle, g_iface, logger, /*do_reset=*/false, g_lock, lock_path);
         if (r < 0) {
-            close_usb_locked();
-            return env->NewStringUTF("USB claim failed (is the adapter already in use?)");
+            return fail_start("USB claim failed (is the adapter already in use?)");
         }
 
         devourer::DeviceConfig cfg{};
@@ -273,16 +283,13 @@ Java_com_emptyset_detector_radio_NativeRx_nativeStart(
             const int chip_rc = libusb_control_transfer(
                 g_handle, REALTEK_USB_VENQT_READ, 5, 0x00FC, 0, &chip_id, 1, USB_TIMEOUT);
             if (chip_rc != 1) {
-                close_usb_locked();
-                return env->NewStringUTF(
-                    "SYS_CFG2 chip-id read failed. Unplug, grant USB, and start again.");
+                return fail_start("SYS_CFG2 chip-id read failed. Unplug, grant USB, and start again.");
             }
         }
 
         WiFiDriver driver(logger);
         g_radio = driver.CreateRadio(g_handle, g_ctx, g_lock, cfg);
         if (!g_radio) {
-            close_usb_locked();
             char msg[128];
             if (mt7612) {
                 std::snprintf(msg, sizeof(msg),
@@ -293,7 +300,7 @@ Java_com_emptyset_detector_radio_NativeRx_nativeStart(
                               "Adapter did not start after chip-id 0x%02x (Jaguar1 is 0x04, 0x05, or 0x08)",
                               chip_id);
             }
-            return env->NewStringUTF(msg);
+            return fail_start(msg);
         }
 
         const uint8_t start_ch = static_cast<uint8_t>(channel <= 0 ? 1 : channel);
@@ -328,12 +335,20 @@ Java_com_emptyset_detector_radio_NativeRx_nativeStart(
             close_usb_locked();
         } catch (...) {
         }
+        if (g_sink != nullptr) {
+            env->DeleteGlobalRef(g_sink);
+            g_sink = nullptr;
+        }
         return env->NewStringUTF(ex.what());
     } catch (...) {
         g_running = false;
         try {
             close_usb_locked();
         } catch (...) {
+        }
+        if (g_sink != nullptr) {
+            env->DeleteGlobalRef(g_sink);
+            g_sink = nullptr;
         }
         return env->NewStringUTF("native start failed");
     }

@@ -21,6 +21,10 @@ object SurveyPcap {
         records.forEach { record ->
             when (record.radio) {
                 SurveyRadio.WIFI -> out.packet(0, record.timestamp, beacon(record))
+                SurveyRadio.CLIENT -> {
+                    val ap = record.associatedBssid.orEmpty()
+                    if (ap.split(':', '-').size == 6) out.packet(0, record.timestamp, clientData(record, ap))
+                }
                 SurveyRadio.BLE -> out.packet(1, record.timestamp, bleAdvert(record))
             }
         }
@@ -45,6 +49,18 @@ object SurveyPcap {
         if (channel in 1..233) {
             body.u8(3); body.u8(1); body.u8(channel)
         }
+        return radiotap(record) + body.toByteArray()
+    }
+
+    private fun clientData(record: WardrivingRecord, accessPoint: String): ByteArray {
+        val body = ByteArrayWriter()
+        body.u8(0x08)
+        body.u8(0x01)
+        body.u16(0)
+        body.mac(accessPoint)
+        body.mac(record.bssid)
+        body.mac(accessPoint)
+        body.u16(0)
         return radiotap(record) + body.toByteArray()
     }
 

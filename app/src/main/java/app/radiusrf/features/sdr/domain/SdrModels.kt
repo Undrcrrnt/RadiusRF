@@ -6,9 +6,22 @@ data class SdrDeviceInfo(
     val deviceName: String,
     val chipset: String,
     val isRtlSdr: Boolean,
-    val isHackrf: Boolean = false
+    val isHackrf: Boolean = false,
+    val isAirspy: Boolean = false,
+    val isAirspyHf: Boolean = false,
+    val isHydra: Boolean = false
 ) {
     val vidPid: String get() = "%04X:%04X".format(vendorId, productId)
+    val canListen: Boolean get() = isRtlSdr || isHackrf || isAirspy || isAirspyHf || isHydra
+
+    fun radioKind(): SdrRadio = when {
+        isHackrf -> SdrRadio.HACKRF
+        isAirspy -> SdrRadio.AIRSPY
+        isAirspyHf -> SdrRadio.AIRSPYHF
+        isHydra -> SdrRadio.HYDRA
+        isRtlSdr -> SdrRadio.RTL
+        else -> SdrRadio.OTHER
+    }
 }
 
 data class SdrState(
@@ -32,6 +45,17 @@ data class SdrState(
     val lna: Int = 16,
     val vga: Int = 20,
     val amp: Boolean = false,
+    val biasTee: Boolean = false,
+    val directSampling: DirectSampling = DirectSampling.AUTO,
+    val allowOutOfBand: Boolean = false,
+    val channelBandwidthHz: Int = SdrBands.defaultBandwidth(SdrMode.WFM),
+    val waterfallFps: Int = 12,
+    val fileRepeat: Boolean = true,
+    val fileFormat: IqFileFormat = IqFileFormat.UNSIGNED8,
+    val rtlTcpHost: String = "192.168.1.1",
+    val rtlTcpPort: Int = 1234,
+    val recordOnSquelch: Boolean = false,
+    val recordings: List<SdrRecording> = emptyList(),
     val sweeping: Boolean = false,
     val remoteIds: List<RemoteIdSighting> = emptyList(),
     val remoteScanning: Boolean = false,

@@ -1,3 +1,4 @@
+import java.time.Duration
 import java.util.Properties
 
 plugins {
@@ -26,7 +27,12 @@ android {
 
     testOptions {
         // Domain classes log through android.util.Log; return defaults instead of throwing in JVM tests.
-        unitTests.isReturnDefaultValues = true
+        unitTests {
+            isReturnDefaultValues = true
+            all {
+                it.timeout.set(Duration.ofMinutes(1))
+            }
+        }
     }
     compileSdk {
         version = release(37) {
@@ -132,6 +138,7 @@ dependencies {
     implementation(libs.play.services.location)
     implementation(libs.androidx.core.splashscreen)
     implementation(libs.androidx.core.uwb)
+    implementation(libs.osmdroid.android)
 
     testImplementation(libs.junit)
     testImplementation(libs.mockk)

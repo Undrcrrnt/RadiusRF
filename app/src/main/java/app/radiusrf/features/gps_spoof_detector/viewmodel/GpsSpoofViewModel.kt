@@ -36,6 +36,7 @@ class GpsSpoofViewModel @Inject constructor(
     private val alertCenterRepository: AlertCenterRepository
 ) : ViewModel() {
 
+    private val sensorOwner = Any()
     // Tracks whether spoofing was flagged on the previous analysis pass, so we
     // only record an alert on the rising edge instead of every 5s while it persists.
     private var wasSpoofDetected = false
@@ -77,7 +78,7 @@ class GpsSpoofViewModel @Inject constructor(
         }
 
         // Start sensor collection
-        sensorDataCollector.start()
+        sensorDataCollector.start(sensorOwner)
         _state.value = _state.value.copy(sensorStatus = "Active")
 
         // Start GPS tracking
@@ -164,7 +165,7 @@ class GpsSpoofViewModel @Inject constructor(
         cellJob = null
         wifiJob = null
         analysisJob = null
-        sensorDataCollector.stop()
+        sensorDataCollector.stop(sensorOwner)
     }
 
     private fun runAnalysis() {

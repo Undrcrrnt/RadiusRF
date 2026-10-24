@@ -24,6 +24,7 @@ import app.radiusrf.features.wifi.domain.WifiAccessPoint
 import app.radiusrf.features.wifi.domain.WifiAssessment
 import app.radiusrf.features.wifi.domain.WifiScanner
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.coroutineScope
@@ -42,6 +43,9 @@ import kotlin.math.sqrt
 
 enum class SweepPhase { READY, RUNNING, DONE }
 
+/** Magnetic anomaly walks are not on the sweep clock. The person starts and completes them. */
+enum class MagneticPhase { IDLE, READY, WALKING }
+
 data class SweepUiState(
     val preset: SweepPreset = SweepPreset.FULL,
     val place: String = "",
@@ -56,7 +60,8 @@ data class SweepUiState(
     val sessionId: String? = null,
     /** The last saved sweep of the same place, for "Compare with last". */
     val previousSessionId: String? = null,
-    val startedAt: Long = 0
+    val startedAt: Long = 0,
+    val magneticPhase: MagneticPhase = MagneticPhase.IDLE
 ) {
     val doneCount: Int get() = progress.count { it.state == CheckState.DONE || it.state == CheckState.SKIPPED }
     val fraction: Float get() = if (progress.isEmpty()) 0f else doneCount.toFloat() / progress.size
@@ -93,11 +98,16 @@ class SweepViewModel @Inject constructor(
 
     private var runJob: Job? = null
     private var stepJob: Job? = null
+    private var magneticStart: CompletableDeferred<Unit>? = null
+    private var magneticFinish: CompletableDeferred<Unit>? = null
+    private val sensorOwner = Any()
     private var aps: List<WifiAccessPoint> = emptyList()
     private var devices: List<BleDevice> = emptyList()
 
     fun start() {
         if (runJob?.isActive == true) return
+        aps = emptyList()
+        devices = emptyList()
         val preset = _state.value.preset
         val startedAt = System.currentTimeMillis()
         _state.update {
@@ -105,10 +115,14 @@ class SweepViewModel @Inject constructor(
                 phase = SweepPhase.RUNNING,
                 progress = preset.checks.map { c -> CheckProgress(c) },
                 findings = emptyList(),
+                elapsedMs = 0L,
+                devicesHeard = 0,
+                sessionId = null,
+                previousSessionId = null,
+                magneticPhase = MagneticPhase.IDLE,
                 startedAt = startedAt,
                 estimatedMs = (if (preset.needsRadios) RADIO_MS else 0L) +
-                    (if (preset.needsMicrophone) ULTRASONIC_MS else 0L) +
-                    (if (SweepCheck.MAGNETIC in preset.checks) MAGNETIC_MS else 0L)
+                    (if (preset.needsMicrophone) ULTRASONIC_MS else 0L)
             )
         }
         runJob = viewModelScope.launch {
@@ -138,6 +152,16 @@ class SweepViewModel @Inject constructor(
         stepJob?.cancel()
     }
 
+    /** Begins the magnetic walk. The sweep waits here until [completeMagnetic]. */
+    fun startMagnetic() {
+        magneticStart?.complete(Unit)
+    }
+
+    /** Ends the magnetic walk and scores whatever the phone measured. */
+    fun completeMagnetic() {
+        magneticFinish?.complete(Unit)
+    }
+
     /** Stops the whole sweep and shows the report for what ran. */
     fun stop() {
         if (_state.value.phase != SweepPhase.RUNNING) return
@@ -151,16 +175,24 @@ class SweepViewModel @Inject constructor(
 
     private suspend fun radios(preset: SweepPreset) {
         val radioChecks = preset.checks.filter { it in SweepPreset.RADIO_CHECKS }
+        var wifiFailure: String? = null
+        var bleFailure: String? = null
         radioChecks.forEach { setState(it, CheckState.RUNNING) }
         hint("Walk slowly around the room with the phone. Keep it about 30 cm from outlets, smoke detectors, vents and TVs.")
         try {
             withTimeoutOrNull(RADIO_MS) {
                 coroutineScope {
                     if (preset.checks.any { it == SweepCheck.WIFI || it == SweepCheck.ROGUE_AP || it == SweepCheck.CAMERAS }) {
-                        launch { wifiScanner.scan().catch { }.collect { aps = it } }
+                        launch {
+                            wifiScanner.scan()
+                                .catch { wifiFailure = it.message ?: "Wi-Fi scan failed" }
+                                .collect { aps = it }
+                        }
                     }
                     launch {
-                        bleScanner.scan().catch { }.collect { list ->
+                        bleScanner.scan()
+                            .catch { bleFailure = it.message ?: "Bluetooth scan failed" }
+                            .collect { list ->
                             devices = list
                             _state.update { it.copy(devicesHeard = aps.size + list.size) }
                             if (SweepCheck.TRACKERS in preset.checks) {
@@ -172,6 +204,16 @@ class SweepViewModel @Inject constructor(
             }
         } finally {
             radioChecks.forEach { check ->
+                val failure = when (check) {
+                    SweepCheck.WIFI, SweepCheck.ROGUE_AP -> wifiFailure
+                    SweepCheck.TRACKERS -> bleFailure
+                    SweepCheck.CAMERAS -> wifiFailure ?: bleFailure
+                    else -> null
+                }
+                if (failure != null) {
+                    complete(check, failure, 0, skipped = true)
+                    return@forEach
+                }
                 val result = when (check) {
                     SweepCheck.WIFI -> evaluator.wifi(aps)
                     SweepCheck.ROGUE_AP -> evaluator.rogueAp(aps, settings.trustedNetworks.value)
@@ -215,31 +257,63 @@ class SweepViewModel @Inject constructor(
     }
 
     private suspend fun magnetic() {
-        setState(SweepCheck.MAGNETIC, CheckState.RUNNING)
-        hint("Hold still for a moment to set a baseline, then move the top of the phone slowly along walls and furniture.")
         val samples = mutableListOf<Float>()
-        sensors.start()
+        var noSensor = false
         try {
-            if (!sensors.magnetometer.first().isAvailable && withTimeoutOrNull(1_500) { sensors.magnetometer.first { it.isAvailable } } == null) {
-                complete(SweepCheck.MAGNETIC, "No magnetometer on this phone", 0, skipped = true)
+            val start = CompletableDeferred<Unit>()
+            magneticStart = start
+            hint("The other checks are done. Start the magnetic scan when you are ready to walk the room. It keeps going until you complete it.")
+            _state.update { s ->
+                s.copy(
+                    magneticPhase = MagneticPhase.READY,
+                    progress = s.progress.map {
+                        if (it.check == SweepCheck.MAGNETIC) it.copy(result = "Waiting for you to start") else it
+                    }
+                )
+            }
+            start.await()
+            magneticStart = null
+            setState(SweepCheck.MAGNETIC, CheckState.RUNNING)
+            hint("Hold still for a moment to set a baseline, then move the top of the phone slowly along walls and furniture. Complete the scan when the room is done.")
+            val finish = CompletableDeferred<Unit>()
+            magneticFinish = finish
+            _state.update { it.copy(magneticPhase = MagneticPhase.WALKING) }
+            sensors.start(sensorOwner)
+            val reading = sensors.magnetometer.first()
+            if (!reading.isAvailable && withTimeoutOrNull(1_500) { sensors.magnetometer.first { it.isAvailable } } == null) {
+                noSensor = true
                 return
             }
-            withTimeoutOrNull(MAGNETIC_MS) {
-                sensors.magnetometer.collect { r ->
-                    if (r.isAvailable && r.values.size >= 3) {
-                        samples += sqrt(r.values[0] * r.values[0] + r.values[1] * r.values[1] + r.values[2] * r.values[2])
+            coroutineScope {
+                val sampling = launch {
+                    sensors.magnetometer.collect { r ->
+                        if (r.isAvailable && r.values.size >= 3) {
+                            samples += sqrt(r.values[0] * r.values[0] + r.values[1] * r.values[1] + r.values[2] * r.values[2])
+                        }
                     }
+                }
+                try {
+                    finish.await()
+                } finally {
+                    sampling.cancel()
                 }
             }
         } finally {
-            sensors.stop()
-            if (samples.size >= 4 && _state.value.progress.firstOrNull { it.check == SweepCheck.MAGNETIC }?.state == CheckState.RUNNING) {
-                val baseline = samples.take(minOf(10, samples.size)).average().toFloat()
-                val result = evaluator.magnetic(baseline, samples.max())
-                publish(SweepCheck.MAGNETIC, result.findings)
-                complete(SweepCheck.MAGNETIC, result.summary, result.findings.size)
-            } else if (_state.value.progress.firstOrNull { it.check == SweepCheck.MAGNETIC }?.state == CheckState.RUNNING) {
-                complete(SweepCheck.MAGNETIC, "Stopped before a baseline was set", 0, skipped = true)
+            magneticStart = null
+            magneticFinish = null
+            sensors.stop(sensorOwner)
+            _state.update { it.copy(magneticPhase = MagneticPhase.IDLE) }
+            val stillOpen = _state.value.progress.firstOrNull { it.check == SweepCheck.MAGNETIC }?.state
+            when {
+                noSensor -> complete(SweepCheck.MAGNETIC, "No magnetometer on this phone", 0, skipped = true)
+                samples.size >= 4 && stillOpen == CheckState.RUNNING -> {
+                    val baseline = samples.take(minOf(10, samples.size)).average().toFloat()
+                    val result = evaluator.magnetic(baseline, samples.max())
+                    publish(SweepCheck.MAGNETIC, result.findings)
+                    complete(SweepCheck.MAGNETIC, result.summary, result.findings.size)
+                }
+                stillOpen == CheckState.QUEUED || stillOpen == CheckState.RUNNING ->
+                    complete(SweepCheck.MAGNETIC, "Stopped before a baseline was set", 0, skipped = true)
             }
         }
     }
@@ -319,13 +393,12 @@ class SweepViewModel @Inject constructor(
 
     override fun onCleared() {
         runJob?.cancel()
-        sensors.stop()
+        sensors.stop(sensorOwner)
     }
 
     companion object {
         const val SESSION_TOOL = "sweep"
         const val RADIO_MS = 30_000L
         const val ULTRASONIC_MS = 20_000L
-        const val MAGNETIC_MS = 20_000L
     }
 }

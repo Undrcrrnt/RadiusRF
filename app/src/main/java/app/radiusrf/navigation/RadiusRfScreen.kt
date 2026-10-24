@@ -52,6 +52,11 @@ sealed class RadiusRfScreen(
     data object DeauthDetector : RadiusRfScreen("deauth_detector", "Deauth Detector")
     data object EmfMapper : RadiusRfScreen("emf_mapper", "EMF Mapper")
     data object SignalLogger : RadiusRfScreen("signal_logger", "Signal Logger")
+    data object SignatureWatch : RadiusRfScreen("signature_watch", "Signature Watch")
+    data object Ftm : RadiusRfScreen("ftm", "FTM Ranging")
+    data object IsmDecoder : RadiusRfScreen("ism_decoder", "ISM Decoder")
+    data object TrafficRadio : RadiusRfScreen("traffic_radio", "ADS-B / AIS")
+    data object Meshtastic : RadiusRfScreen("meshtastic", "Meshtastic Listen")
 
     companion object {
         // Lazy: an eager list here can capture nulls when a subclass object initializes first.
@@ -62,7 +67,8 @@ sealed class RadiusRfScreen(
                 Usb, Sdr, FoxHunt, FieldMap, Camera, Ultrasonic, Wardriving, WardrivingPlus, WardrivingPlusPlus, WifiAware,
                 CellTower, UsbCamera, Gps, BluetoothClassic, WifiDirect, HiddenCamera,
                 GpsSpoofDetector, BluetoothTracker, RogueAp, NetworkScanner, RfBugSweeper, ProximityRadar,
-                PrivacyScore, DeauthDetector, EmfMapper, SignalLogger
+                PrivacyScore, DeauthDetector, EmfMapper, SignalLogger,
+                SignatureWatch, Ftm, IsmDecoder, TrafficRadio, Meshtastic
             )
         }
     }

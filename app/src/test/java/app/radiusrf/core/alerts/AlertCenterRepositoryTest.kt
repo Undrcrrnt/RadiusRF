@@ -20,12 +20,20 @@ class AlertCenterRepositoryTest {
 
     private val dao = mockk<AlertDao>()
 
+    private fun stubFlows(
+        recent: List<AlertEntity> = emptyList(),
+        open: List<AlertEntity> = recent.filter { it.status == "OPEN" }
+    ) {
+        every { dao.observeRecent() } returns flowOf(recent)
+        every { dao.observeOpen() } returns flowOf(open)
+    }
+
     private fun entity(id: String, source: String = "ROGUE_AP", severity: String = "HIGH", ts: Long = 1L) =
         AlertEntity(id = id, source = source, severity = severity, title = "t-$id", detail = "d-$id", timestamp = ts)
 
     @Test
     fun `maps stored rows to unified alerts`() = runBlocking {
-        every { dao.observeRecent() } returns flowOf(listOf(entity("a", ts = 10L), entity("b", "GPS_SPOOF", "LOW", 5L)))
+        stubFlows(listOf(entity("a", ts = 10L), entity("b", "GPS_SPOOF", "LOW", 5L)))
 
         val alerts = AlertCenterRepository(dao).alerts.first()
 
@@ -40,7 +48,7 @@ class AlertCenterRepositoryTest {
 
     @Test
     fun `rows with unknown source or severity are dropped instead of crashing`() = runBlocking {
-        every { dao.observeRecent() } returns flowOf(
+        stubFlows(
             listOf(entity("ok"), entity("bad-source", source = "LASER"), entity("bad-sev", severity = "MEH"))
         )
 
@@ -51,7 +59,7 @@ class AlertCenterRepositoryTest {
 
     @Test
     fun `record persists the enum names and a fresh id`() = runBlocking {
-        every { dao.observeRecent() } returns flowOf(emptyList())
+        stubFlows()
         val inserted = mutableListOf<AlertEntity>()
         coEvery { dao.insert(capture(inserted)) } returns Unit
         val repo = AlertCenterRepository(dao)
@@ -70,7 +78,7 @@ class AlertCenterRepositoryTest {
 
     @Test
     fun `clearAll delegates to the dao`() = runBlocking {
-        every { dao.observeRecent() } returns flowOf(emptyList())
+        stubFlows()
         coJustRun { dao.clearAll() }
 
         AlertCenterRepository(dao).clearAll()
@@ -88,7 +96,7 @@ class AlertCenterRepositoryTest {
     @Test
     fun `resolving and reopening write status through the dao`() = runBlocking {
         io.mockk.coEvery { dao.setStatus(any(), any(), any(), any()) } returns Unit
-        every { dao.observeRecent() } returns flowOf(emptyList())
+        stubFlows()
         val repo = AlertCenterRepository(dao)
 
         repo.resolve("a", AlertResolution.MINE, now = 42L)
@@ -100,12 +108,11 @@ class AlertCenterRepositoryTest {
 
     @Test
     fun `status and resolution are mapped and open alerts filtered`() = runBlocking {
-        every { dao.observeRecent() } returns flowOf(
-            listOf(
-                entity("a"),
-                AlertEntity("b", "ROGUE_AP", "HIGH", "t", "d", 1L, status = "RESOLVED", resolution = "SAFE", resolvedAt = 5L)
-            )
+        val recent = listOf(
+            entity("a"),
+            AlertEntity("b", "ROGUE_AP", "HIGH", "t", "d", 1L, status = "RESOLVED", resolution = "SAFE", resolvedAt = 5L)
         )
+        stubFlows(recent)
         val repo = AlertCenterRepository(dao)
 
         val all = repo.alerts.first()

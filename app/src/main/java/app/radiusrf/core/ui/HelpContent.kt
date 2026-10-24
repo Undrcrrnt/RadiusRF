@@ -49,7 +49,28 @@ object HelpContent {
             facts = listOf(
                 HelpFact("Your own tags show up too", "Mark them as yours so they stop alerting"),
                 HelpFact("Separated AirTags", "An AirTag away from its owner broadcasts differently, which is what gets flagged"),
-                HelpFact("Distance is a guess", "Estimated from signal strength; can be off by 2× indoors")
+                HelpFact("Distance is a guess", "Estimated from signal strength; can be off by 2× indoors"),
+                HelpFact("Find Hub", "Unnamed Google Fast Pair / Find My Device advertisements are treated as Find Hub")
+            )
+        ),
+
+        "signature_watch" to FeatureHelp(
+            title = "Signature Watch",
+            description = "Find Hub, glasses, action cams, serial modules",
+            steps = listOf(
+                "Tap Start and stay in the room or street you care about.",
+                "Filter by kind if the list is long.",
+                "A match is a reason to look, not proof of a threat."
+            ),
+            howItWorks = "The phone already hears BLE advertisements and Wi-Fi names. This list matches Google Find Hub, camera-glasses names, action-cam and cheap IP-cam hotspots, and common serial-module names such as HC-05.",
+            legend = listOf(
+                HelpLegend(LegendMark.TAG_INFO, "FIND HUB", "Google Find My Device network advertisement"),
+                HelpLegend(LegendMark.TAG_WARN, "GLASSES", "Wearable camera name"),
+                HelpLegend(LegendMark.TAG_WARN, "SERIAL", "HC-05-style module name")
+            ),
+            facts = listOf(
+                HelpFact("Receive only", "It identifies advertisements. It does not connect."),
+                HelpFact("False names", "Anyone can rename a module. Treat a match as a hint.")
             )
         ),
 
@@ -232,7 +253,7 @@ object HelpContent {
             title = "WiFi Analyzer",
             description = "Find crowded channels and weak security",
             steps = listOf(
-                "Tap Start. The scan runs for 30 s by default.",
+                "Tap Start. The scan keeps running until you tap Stop.",
                 "Open Channels to see which channel is least crowded.",
                 "Tap a network for its details, or flag it as trusted."
             ),
@@ -247,7 +268,7 @@ object HelpContent {
                 HelpFact("Android limits scans", "4 scans every 2 minutes per app"),
                 HelpFact("Location permission", "Required by Android for WiFi results; never stored"),
                 HelpFact("Hidden networks", "Shown as [hidden]; their names can’t be read"),
-                HelpFact("Layouts", "Cards, Compact, and Links show the same scan. Links lists clients heard on a USB adapter, or this phone when it is joined")
+                HelpFact("Clients", "Cards, Compact, and Links list devices heard talking to an access point. A USB adapter hears nearby clients. The phone radio lists this phone when it is joined. Stopping the scan keeps those clients in the scan log")
             )
         ),
 
@@ -303,7 +324,27 @@ object HelpContent {
             ),
             facts = listOf(
                 HelpFact("Permission matters", "Only scan networks you own or have written permission to test"),
-                HelpFact("Your LAN only", "It never scans the internet")
+                HelpFact("Your LAN only", "It never scans the internet"),
+                HelpFact("Announced services", "mDNS and SSDP list Chromecasts, printers, and cameras that a port scan can miss")
+            )
+        ),
+
+        "ftm" to FeatureHelp(
+            title = "FTM Ranging",
+            description = "802.11mc distance to nearby access points",
+            steps = listOf(
+                "Tap Start near the access points you want to range.",
+                "APs that answer 802.11mc show a metre reading.",
+                "Compare that distance with the RSSI guess on Proximity Radar."
+            ),
+            howItWorks = "Fine Timing Measurement sends a Wi-Fi round-trip time to an AP that supports 802.11mc. The phone converts that time to metres. RSSI is not used for the distance.",
+            legend = listOf(
+                HelpLegend(LegendMark.TAG_GOOD, "FTM", "The AP answered and a distance is shown"),
+                HelpLegend(LegendMark.TAG_INFO, "NO FTM", "The AP does not advertise 802.11mc")
+            ),
+            facts = listOf(
+                HelpFact("Hardware", "The phone and the AP both need Wi-Fi RTT"),
+                HelpFact("Home routers", "Most consumer APs do not answer FTM")
             )
         ),
 
@@ -343,14 +384,17 @@ object HelpContent {
             title = "Fox Hunt",
             description = "Find the heading where a signal is strongest",
             steps = listOf(
-                "Pick a Wi-Fi access point, a Bluetooth device, or Signal meter for an SDR that is already listening.",
-                "On an SDR hunt, Meter shows the tuned frequency, a vertical level bar, and the current and peak readings. Compass, strength, and map are the other views.",
-                "Turn slowly through a full circle. The white line is the heading of the strongest sample. Reset bearing to start another turn."
+                "On Fox Hunt, tap Start to open the plugged-in receiver. Pause and Stop are on the same screen.",
+                "Enter the watch frequency. The meter measures the background for a moment, then locks its scale for the sweep.",
+                "Sweep a directional antenna slowly left to right. The fill is live level; the pale line is peak hold.",
+                "Centre the antenna on the highest peak. Set Ref makes that the top of the scale so you can work either side of it. Reset Peak clears the hold for another sweep."
             ),
-            howItWorks = "A single receiver cannot compute a location. The phone’s compass records which way you were facing each time the chosen signal is measured. The bearing is the heading of the strongest reading. The strength view is the same rising and falling trace used by Locate. The map draws that bearing from your GPS position on a local grid, with no map tiles downloaded.",
+            howItWorks = "The meter watches one frequency. After a short background sample it freezes the scale so the stack does not jump while you turn. Peak hold keeps the strongest reading as a pale line after a burst fades. Set Ref locks that peak as the ceiling. The bearing is the compass heading at that peak — a direction from where you stand, not a location. Map and heatmap plot this phone’s path on OpenStreetMap. Import a tile archive to keep streets offline.",
             facts = listOf(
                 HelpFact("Bearing, not a fix", "One line from where you stand. A second hunt from another spot crosses it"),
-                HelpFact("Receive only", "It listens. It does not transmit")
+                HelpFact("Heat belongs to the phone", "A red patch is where this phone heard the strongest signal, not a claimed transmitter position"),
+                HelpFact("Receive only", "It listens. It does not transmit"),
+                HelpFact("Offline streets", "Import a tile archive from the folder button so the map works without a network")
             )
         ),
         "field_map" to FeatureHelp(
@@ -361,10 +405,56 @@ object HelpContent {
                 "Turn Survey, Remote ID, and Bearing on or off.",
                 "A Remote ID aircraft is red. Its takeoff, pilot, or fixed point is amber, joined by a dotted line."
             ),
-            howItWorks = "Positions come from wardrive logs, OpenDroneID broadcasts, and the fox-hunt bearing already stored on the phone. North is up. The grid is metres around you. Nothing is fetched from a map server.",
+            howItWorks = "Positions come from wardrive logs, OpenDroneID broadcasts, and the fox-hunt bearing already stored on the phone. Streets come from an imported OpenStreetMap archive, or from the network if you allow it. The Cameras layer pulls mapped surveillance and ALPR nodes from OpenStreetMap.",
             facts = listOf(
-                HelpFact("No basemap", "Street imagery is not downloaded. The plot is your own points"),
-                HelpFact("Remote ID", "Aircraft and operator locations are whatever the broadcast included")
+                HelpFact("Offline streets", "Import an .mbtiles, .zip, .sqlite, or .gemf archive from Settings or the folder button on the map"),
+                HelpFact("Remote ID", "Aircraft and operator locations are whatever the broadcast included"),
+                HelpFact("Cameras layer", "Public OSM tags only. Unmapped cameras do not appear.")
+            )
+        ),
+
+        "ism_decoder" to FeatureHelp(
+            title = "ISM Decoder",
+            description = "Name 315/433/868/915 MHz sensor bursts",
+            steps = listOf(
+                "Plug in an RTL-SDR or HackRF.",
+                "Pick 315, 433, 868, or 915 MHz.",
+                "Start and wait for a burst. The family is a timing match."
+            ),
+            howItWorks = "Short OOK and FSK bursts are pulled from the IQ stream. Pulse widths are compared with common ISM families: TPMS, doorbells, weather nodes, and alarm sensors.",
+            facts = listOf(
+                HelpFact("Receive only", "The dongle listens. It does not transmit."),
+                HelpFact("Not a full rtl_433 dump", "A family name is timing, not a decoded sensor ID.")
+            )
+        ),
+
+        "traffic_radio" to FeatureHelp(
+            title = "ADS-B / AIS",
+            description = "Decode nearby aircraft and ships",
+            steps = listOf(
+                "Plug in a dongle that can reach 1090 MHz or 162 MHz.",
+                "Pick ADS-B or AIS, then Start.",
+                "Aircraft need two CPR frames before a position appears."
+            ),
+            howItWorks = "ADS-B reads Mode S DF17 on 1090 MHz. AIS reads public A/B messages on 162 MHz. Both are broadcasts meant to be heard.",
+            facts = listOf(
+                HelpFact("Airspy HF+", "Cannot reach 1090 MHz"),
+                HelpFact("Antenna", "A 1090 MHz or marine VHF antenna hears much farther than a stock dongle whip")
+            )
+        ),
+
+        "meshtastic" to FeatureHelp(
+            title = "Meshtastic Listen",
+            description = "Hear Meshtastic nodes without joining",
+            steps = listOf(
+                "Tap Start.",
+                "Nodes that advertise the Meshtastic Bluetooth service are listed.",
+                "Leave the SDR for ADS-B, AIS, or ISM. This screen does not open it."
+            ),
+            howItWorks = "Meshtastic handhelds and phones advertise a Bluetooth service so an app can pair. This tool lists those advertisements. It does not join the LoRa mesh, send a packet, or stream the USB receiver.",
+            facts = listOf(
+                HelpFact("Hear only", "No mesh join, no transmit"),
+                HelpFact("LoRa packets", "Full LoRa decode needs a LoRa radio, not a phone")
             )
         ),
 
@@ -372,11 +462,11 @@ object HelpContent {
             title = "SDR Radio",
             description = "Tune an RTL-SDR or HackRF: spectrum, waterfall, and audio",
             steps = listOf(
-                "Plug an RTL-SDR or HackRF into a USB-OTG adapter and tap Connect.",
-                "Pick a band or enter a frequency, choose the mode and span, and tap Listen. Drag the spectrum to retune, or tap it to move the channel marker.",
+                "Plug an RTL-SDR or HackRF into a USB-OTG adapter, then open SDR Radio. The dongle is recognized and the spectrum starts. Allow the USB prompt the first time.",
+                "The spectrum and waterfall fill the screen. Drag sideways to tune, pinch to zoom, and drag the channel marker to listen there. Source, Demodulation, Recording, Display, and Settings are in the drawer. In landscape the drawer moves to the side.",
                 "Record IQ, sweep the band list, scan OpenDroneID, check phone GNSS, or export CoT."
             ),
-            howItWorks = "The dongle samples the radio and the phone draws the spectrum and waterfall, then demodulates audio. HackRF listens from 1 MHz to 6 GHz with LNA, VGA, and the RF amp. A strong peak is logged and spoken. GPS L1 compares that frequency with a nearby channel, and the phone GNSS watch looks for a drop in carrier-to-noise and gain. OpenDroneID reads the public Bluetooth Remote ID broadcast. Airspy, Airspy HF+, and HydraSDR are recognised; their receive drivers are not in this build.",
+            howItWorks = "The dongle samples the radio and the phone draws the spectrum and waterfall, then demodulates audio. HackRF listens from 1 MHz to 6 GHz with LNA, VGA, and the RF amp. A strong peak is logged. GPS L1 compares that frequency with a nearby channel, and the phone GNSS watch looks for a drop in carrier-to-noise and gain. OpenDroneID reads the public Bluetooth Remote ID broadcast. Airspy, Airspy HF+, and HydraSDR listen in this build. SDRplay, LimeSDR, bladeRF, USRP, and ADALM-PLUTO are recognised only.",
             facts = listOf(
                 HelpFact("Receive only", "It tunes and listens. It does not transmit"),
                 HelpFact("Remote ID", "Bluetooth OpenDroneID advertisements are listed with location when the broadcast includes one"),
@@ -570,11 +660,12 @@ object HelpContent {
             title = "Wardriving",
             description = "GPS + Wi-Fi log and export",
             steps = listOf(
+                "Pick the phone radio or a plugged-in USB adapter. Wi-Fi Analyzer uses the same choice.",
                 "Tap Start; a notification keeps it running.",
                 "Walk, cycle or drive a route.",
                 "Stop, then export WiGLE, Kismet, airodump-ng, PCAPNG, or CSV."
             ),
-            howItWorks = "Wardriving pairs each Wi-Fi network with the GPS fix where it was heard. WiGLE CSV, Kismet CSV, Kismet netxml, and airodump-ng CSV open in Netseer. PCAPNG opens in Wireshark. The PCAPNG is rebuilt from the log.",
+            howItWorks = "Wardriving pairs each Wi-Fi network with the GPS fix where it was heard. A USB adapter listens for beacons on that stick. WiGLE CSV, Kismet CSV, Kismet netxml, and airodump-ng CSV open in Netseer. PCAPNG opens in Wireshark. The PCAPNG is rebuilt from the log.",
             legend = listOf(
                 HelpLegend(LegendMark.TAG_GOOD, "SECURED", "WPA2 or WPA3"),
                 HelpLegend(LegendMark.TAG_WARN, "WEP", "Broken encryption"),
@@ -583,20 +674,23 @@ object HelpContent {
             facts = listOf(
                 HelpFact("Runs in the background", "A foreground service keeps logging with the screen off"),
                 HelpFact("Passive only", "It records what networks broadcast; it never connects"),
-                HelpFact("One survey at a time", "Starting another wardriving tool replaces the one that is logging")
+                HelpFact("One survey at a time", "Starting another wardriving tool replaces the one that is logging"),
+                HelpFact("USB adapters", "Archer T2U Plus, Alfa RTL8812AU, Alfa AWUS1900, Panda PAU0A, and MediaTek MT7612U log beacons the same way Wi-Fi Analyzer does"),
+                HelpFact("Clients", "A USB adapter logs each device heard talking to an access point, with that access point and the GPS fix. The Clients list shows them, and the exports include them")
             )
         ),
         "wardriving_plus" to FeatureHelp(
             title = "Wardriving +",
             description = "GPS + Wi-Fi + Bluetooth log and export",
             steps = listOf(
-                "Tap Start and grant Bluetooth along with location.",
+                "Pick the phone radio or a plugged-in USB adapter, then grant Bluetooth along with location.",
                 "Walk, cycle or drive a route.",
                 "Stop, then export the same formats as Wardriving."
             ),
             howItWorks = "Logs Wi-Fi plus nearby Bluetooth LE and classic devices, each with the GPS fix. Bluetooth rows use type BLE or BT in the WiGLE file and become advertising frames in the PCAPNG.",
             facts = listOf(
                 HelpFact("Same exports", "WiGLE, Kismet, airodump-ng, PCAPNG, and a plain CSV"),
+                HelpFact("Clients", "A USB adapter logs devices heard talking to an access point, with the GPS fix"),
                 HelpFact("Passive only", "It records advertisements and names; it does not connect")
             )
         ),
@@ -604,12 +698,13 @@ object HelpContent {
             title = "Wardriving ++",
             description = "GPS + Wi-Fi + Bluetooth + cellular log and export",
             steps = listOf(
-                "Tap Start and grant location, Bluetooth, and phone state.",
+                "Pick the phone radio or a plugged-in USB adapter, then grant location, Bluetooth, and phone state.",
                 "Walk, cycle or drive a route.",
                 "Stop, then export. Cellular rows are in the CSV and Kismet files."
             ),
             howItWorks = "Adds the serving cell and neighbours to the Wi-Fi and Bluetooth log. Each tower is stored as MCC/MNC, area code, and cell id with the GPS fix. Netseer reads those rows from the WiGLE CSV.",
             facts = listOf(
+                HelpFact("Clients", "A USB adapter logs devices heard talking to an access point, with the GPS fix"),
                 HelpFact("Cell rows", "Identified as LTE, NR, GSM, or the radio the phone reports"),
                 HelpFact("PCAPNG", "Wi-Fi beacons and Bluetooth advertisements. Cell sightings stay in the CSV and Kismet files")
             )

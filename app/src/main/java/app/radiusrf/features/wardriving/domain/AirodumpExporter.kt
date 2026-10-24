@@ -61,6 +61,23 @@ object AirodumpExporter {
         }
         sb.appendLine()
         sb.appendLine("Station MAC, First time seen, Last time seen, Power, # packets, BSSID, Probed ESSIDs")
+        records.filter { it.isClient }
+            .groupBy { it.bssid.lowercase() to it.associatedBssid.orEmpty().lowercase() }
+            .values
+            .forEach { group ->
+                val best = group.maxBy { it.rssi }
+                sb.appendLine(
+                    listOf(
+                        best.bssid,
+                        dateFormat.format(Date(group.minOf { it.timestamp })),
+                        dateFormat.format(Date(group.maxOf { it.timestamp })),
+                        best.rssi.toString(),
+                        group.size.toString(),
+                        best.associatedBssid.orEmpty(),
+                        best.ssid.orEmpty().replace(",", " ")
+                    ).joinToString(", ")
+                )
+            }
         return sb.toString()
     }
 }

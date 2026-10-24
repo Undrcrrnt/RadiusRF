@@ -1,9 +1,7 @@
 package app.radiusrf.features.field.ui
 
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -11,46 +9,36 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import app.radiusrf.core.lifecycle.HardwareLifecycleEffect
 import app.radiusrf.core.permission.PermissionGate
 import app.radiusrf.core.permission.PermissionUtils
 import app.radiusrf.core.ui.zd.ZdButton
 import app.radiusrf.core.ui.zd.ZdButtonVariant
+import app.radiusrf.core.ui.zd.ZdCard
 import app.radiusrf.core.ui.zd.ZdChip
 import app.radiusrf.core.ui.zd.ZdChipRow
 import app.radiusrf.core.ui.zd.ZdFootnote
-import app.radiusrf.core.ui.zd.ZdListCard
-import app.radiusrf.core.ui.zd.ZdListRow
+import app.radiusrf.core.ui.zd.ZdIconAction
+import app.radiusrf.core.ui.zd.ZdIcons
 import app.radiusrf.core.ui.zd.ZdSectionLabel
 import app.radiusrf.features.field.domain.FoxFace
 import app.radiusrf.features.field.domain.FoxHuntState
 import app.radiusrf.features.field.domain.FoxHuntViewModel
-import app.radiusrf.features.wifi.domain.WifiAssessment
+import app.radiusrf.features.locate.ui.SignalMap
 import app.radiusrf.ui.theme.ZdColors
 import app.radiusrf.ui.theme.ZdType
-import java.util.Locale
 import kotlin.math.cos
 import kotlin.math.roundToInt
 import kotlin.math.sin
@@ -58,8 +46,8 @@ import kotlin.math.sin
 @Composable
 fun FoxHuntScreen(viewModel: FoxHuntViewModel = hiltViewModel()) {
     PermissionGate(
-        permissions = (PermissionUtils.locationPermissions() + PermissionUtils.wifiPermissions() + PermissionUtils.blePermissions()).distinct(),
-        rationale = "The fox hunt reads Wi-Fi, Bluetooth, and the compass. Location turns the bearing into a line on the map."
+        permissions = PermissionUtils.locationPermissions(),
+        rationale = "The fox hunt uses the compass. Location turns the bearing into a line on the map."
     ) {
         FoxHuntBody(viewModel)
     }
@@ -68,6 +56,12 @@ fun FoxHuntScreen(viewModel: FoxHuntViewModel = hiltViewModel()) {
 @Composable
 private fun FoxHuntBody(viewModel: FoxHuntViewModel) {
     LaunchedEffect(Unit) { viewModel.start() }
+    HardwareLifecycleEffect(
+        isActive = true,
+        onPause = viewModel::pauseHardware,
+        onResume = viewModel::resumeHardware,
+        onStop = viewModel::pauseHardware
+    )
     val state by viewModel.state.collectAsState()
     LazyColumn(
         Modifier.fillMaxSize(),
@@ -75,42 +69,10 @@ private fun FoxHuntBody(viewModel: FoxHuntViewModel) {
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         item {
-            ZdFootnote("Turn with a directional antenna or the phone. The line is the heading where this signal was strongest. It is a bearing, not the transmitter’s location.")
+            ZdFootnote("Point a directional antenna and sweep slowly. The meter holds the strongest reading as a pale line. The heading at that peak is a bearing, not the transmitter’s location.")
         }
-        if (state.target == null) {
-            item { ZdSectionLabel("SDR") }
-            item {
-                ZdButton(
-                    if (state.sdrListening) "Signal meter" else "Start SDR listen, then open the signal meter",
-                    onClick = viewModel::huntSdr,
-                    enabled = state.sdrListening,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                ZdFootnote("The meter tunes the SDR that is already listening. Wi-Fi and Bluetooth hunts stay on the compass, strength, and map.")
-            }
-            item { ZdSectionLabel("Wi-Fi", trailingText = "${state.wifi.size}") }
-            item {
-                if (state.wifi.isEmpty()) ZdFootnote("No Wi-Fi networks yet.")
-                else ZdListCard(state.wifi.take(12)) { ap ->
-                    ZdListRow(
-                        title = WifiAssessment.displayName(ap),
-                        subtitle = "Access point · ${ap.rssi} dBm",
-                        onClick = { viewModel.huntWifi(ap) }
-                    )
-                }
-            }
-            item { ZdSectionLabel("Bluetooth", trailingText = "${state.ble.size}") }
-            item {
-                if (state.ble.isEmpty()) ZdFootnote("No Bluetooth devices yet.")
-                else ZdListCard(state.ble.take(12)) { device ->
-                    ZdListRow(
-                        title = device.displayName,
-                        subtitle = "${device.rssi} dBm",
-                        onClick = { viewModel.huntBle(device) }
-                    )
-                }
-            }
-        } else {
+        item { RadioControls(state, viewModel) }
+        if (state.target != null) {
             item {
                 Text(state.target ?: "", style = ZdType.Heading, color = ZdColors.Accent)
                 Text("${state.cue} · ${state.levelLabel}", style = ZdType.BodySmall, color = ZdColors.Text2)
@@ -130,8 +92,30 @@ private fun FoxHuntBody(viewModel: FoxHuntViewModel) {
                 when (state.face) {
                     FoxFace.COMPASS -> CompassRose(state.heading, state.bearing)
                     FoxFace.STRENGTH -> StrengthTrace(state.samples)
-                    FoxFace.MAP -> LocalPlot(state.lat, state.lon, emptyList(), state.bearing, drawPath = false)
-                    FoxFace.METER -> SignalMeter(state, viewModel)
+                    FoxFace.MAP -> SignalMap(
+                        samples = state.geoSamples,
+                        currentLatitude = state.lat,
+                        currentLongitude = state.lon,
+                        showHeat = false
+                    )
+                    FoxFace.HEATMAP -> SignalMap(
+                        samples = state.geoSamples,
+                        currentLatitude = state.lat,
+                        currentLongitude = state.lon,
+                        showHeat = true
+                    )
+                    FoxFace.METER -> FoxHuntMeter(state, viewModel)
+                }
+                if (state.face == FoxFace.MAP || state.face == FoxFace.HEATMAP) {
+                    Text(
+                        if (state.face == FoxFace.HEATMAP) {
+                            "The cloud shows where this phone heard the tuned signal. Red is strongest; the white ring is the loudest reading."
+                        } else {
+                            "The line shows this phone’s hunt path. It does not place the transmitter."
+                        },
+                        style = ZdType.Caption,
+                        color = ZdColors.Text3
+                    )
                 }
             }
             item {
@@ -147,73 +131,51 @@ private fun FoxFace.label(): String = when (this) {
     FoxFace.COMPASS -> "Compass"
     FoxFace.STRENGTH -> "Strength"
     FoxFace.MAP -> "Map"
+    FoxFace.HEATMAP -> "Heatmap"
 }
 
 @Composable
-private fun SignalMeter(state: FoxHuntState, viewModel: FoxHuntViewModel) {
-    var mhz by remember(state.frequencyHz) {
-        mutableStateOf(String.format(Locale.US, "%.4f", state.frequencyHz / 1_000_000.0))
-    }
+private fun RadioControls(state: FoxHuntState, viewModel: FoxHuntViewModel) {
+    val listening = state.sdrListening
+    val paused = state.sdrPaused
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        OutlinedTextField(
-            value = mhz,
-            onValueChange = { mhz = it },
-            label = { Text("MHz") },
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Done),
-            modifier = Modifier.fillMaxWidth()
-        )
-        Row(
-            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            ZdButton("−1 MHz", onClick = { viewModel.stepSdr(-1_000_000L) }, variant = ZdButtonVariant.Secondary, height = 36.dp)
-            ZdButton("−100 kHz", onClick = { viewModel.stepSdr(-100_000L) }, variant = ZdButtonVariant.Secondary, height = 36.dp)
-            ZdButton(
-                "Tune",
-                onClick = { mhz.toDoubleOrNull()?.let { viewModel.tuneSdr((it * 1_000_000.0).toLong()) } },
-                height = 36.dp
+        ZdSectionLabel("Receiver")
+        ZdCard {
+            Text(
+                when {
+                    paused -> "Paused"
+                    listening -> "Listening"
+                    else -> "Plug in an RTL-SDR or HackRF, then start it here"
+                },
+                style = ZdType.BodySmall,
+                color = ZdColors.Text2
             )
-            ZdButton("+100 kHz", onClick = { viewModel.stepSdr(100_000L) }, variant = ZdButtonVariant.Secondary, height = 36.dp)
-            ZdButton("+1 MHz", onClick = { viewModel.stepSdr(1_000_000L) }, variant = ZdButtonVariant.Secondary, height = 36.dp)
-        }
-        Box(Modifier.fillMaxWidth().height(340.dp), contentAlignment = Alignment.Center) {
-            LevelBar(state.levelDb, state.peakDb, Modifier.width(72.dp).height(340.dp))
-        }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("CURRENT", style = ZdType.Path, color = ZdColors.Text3)
-                Text("${state.levelDb.roundToInt()} dB", style = ZdType.Heading, color = ZdColors.Accent, textAlign = TextAlign.Center)
+            val canStart = paused || !listening || state.target == null
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                ZdIconAction(
+                    icon = ZdIcons.Play,
+                    contentDescription = if (paused) "Resume" else "Start",
+                    onClick = { if (listening && !paused) viewModel.huntSdr() else viewModel.startRadio() },
+                    enabled = canStart,
+                    variant = if (canStart) ZdButtonVariant.Primary else ZdButtonVariant.Secondary
+                )
+                ZdIconAction(
+                    icon = ZdIcons.Pause,
+                    contentDescription = "Pause",
+                    onClick = viewModel::pauseRadio,
+                    enabled = listening && !paused,
+                    variant = ZdButtonVariant.Secondary
+                )
+                ZdIconAction(
+                    icon = ZdIcons.Stop,
+                    contentDescription = "Stop",
+                    onClick = viewModel::stopRadio,
+                    enabled = listening,
+                    variant = if (listening) ZdButtonVariant.Danger else ZdButtonVariant.Secondary
+                )
             }
-            Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("PEAK", style = ZdType.Path, color = ZdColors.Text3)
-                Text("${state.peakDb.roundToInt()} dB", style = ZdType.Heading, color = ZdColors.Text, textAlign = TextAlign.Center)
-            }
         }
-        ZdButton("Reset peak", onClick = viewModel::resetPeak, variant = ZdButtonVariant.Secondary, modifier = Modifier.fillMaxWidth())
-        ZdFootnote(
-            if (state.sdrListening) "Level at the tuned frequency. Relative dB from the receiver, not a calibrated dBm."
-            else "SDR listening has stopped. Open SDR Radio and tap Listen, then come back."
-        )
-    }
-}
-
-@Composable
-private fun LevelBar(level: Float, peak: Float, modifier: Modifier) {
-    val accent = ZdColors.Accent
-    Canvas(modifier) {
-        val floor = -120f
-        val ceil = 20f
-        fun y(db: Float): Float {
-            val fraction = ((db - floor) / (ceil - floor)).coerceIn(0f, 1f)
-            return size.height * (1f - fraction)
-        }
-        drawRect(Color(0xFF10140F))
-        drawRect(ZdColors.Border, style = androidx.compose.ui.graphics.drawscope.Stroke(2f))
-        val top = y(level)
-        drawRect(accent, topLeft = Offset(6f, top), size = Size(size.width - 12f, (size.height - top).coerceAtLeast(0f)))
-        val mark = y(peak)
-        drawLine(Color.White, Offset(0f, mark), Offset(size.width, mark), strokeWidth = 4f)
+        state.radioStatus?.let { ZdFootnote(it) }
     }
 }
 

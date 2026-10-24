@@ -66,6 +66,10 @@ class DwellWatcher(
 
     fun update(now: Long, devices: List<Heard>): List<Dwell> {
         since.entries.removeAll { (key, span) -> (now - span.second > gapResetMs).also { if (it) reported -= key } }
+        devices.filter { it.rssi < thresholdDbm }.forEach {
+            since.remove(it.key)
+            reported.remove(it.key)
+        }
         return devices.filter { it.rssi >= thresholdDbm }.mapNotNull { h ->
             val (first, _) = since[h.key] ?: (now to now)
             since[h.key] = first to now

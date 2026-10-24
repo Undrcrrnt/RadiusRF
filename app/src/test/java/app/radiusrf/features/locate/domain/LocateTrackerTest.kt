@@ -1,67 +1,60 @@
 package app.radiusrf.features.locate.domain
 
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class LocateTrackerTest {
 
     @Test
-    fun `first sample is taken as is`() {
-        val r = LocateTracker().add(-70, now = 0)
-        assertEquals(-70, r.rssi)
-        assertEquals(LocateTrend.STEADY, r.trend)
+    fun `packet comparison reports closer`() {
+        val samples = listOf(
+            LocateSample(2_000, -80),
+            LocateSample(3_000, -79),
+            LocateSample(8_500, -65),
+            LocateSample(9_500, -64)
+        )
+        assertEquals(LocateCue.CLOSER, LocateSignals.packets(samples, 10_000, 9_500, missing = false))
     }
 
     @Test
-    fun `smoothing damps a single jump`() {
-        val t = LocateTracker(alpha = 0.3f)
-        t.add(-80, 0)
-        val r = t.add(-50, 100)
-        assertEquals(-71, r.rssi)
-        assertEquals(-50, r.raw)
+    fun `packet comparison reports further`() {
+        val samples = listOf(
+            LocateSample(2_000, -55),
+            LocateSample(3_000, -56),
+            LocateSample(8_500, -75),
+            LocateSample(9_500, -76)
+        )
+        assertEquals(LocateCue.FURTHER, LocateSignals.packets(samples, 10_000, 9_500, missing = false))
     }
 
     @Test
-    fun `walking towards the device reads warmer`() {
-        val t = LocateTracker()
-        var last: LocateReading? = null
-        for (i in 0..40) last = t.add(-90 + i, now = i * 200L)
-        assertEquals(LocateTrend.WARMER, last!!.trend)
+    fun `quiet and missing states are distinct`() {
+        val samples = listOf(LocateSample(1_000, -70))
+        assertEquals(LocateCue.QUIET, LocateSignals.packets(samples, 10_000, 1_000, missing = false))
+        assertEquals(LocateCue.GONE, LocateSignals.packets(samples, 10_000, 1_000, missing = true))
     }
 
     @Test
-    fun `walking away reads colder`() {
-        val t = LocateTracker()
-        var last: LocateReading? = null
-        for (i in 0..40) last = t.add(-50 - i, now = i * 200L)
-        assertEquals(LocateTrend.COLDER, last!!.trend)
+    fun `wifi sweeps compare consecutive observations`() {
+        assertEquals(
+            LocateCue.CLOSER,
+            LocateSignals.sweeps(
+                listOf(LocateSample(1_000, -80), LocateSample(9_000, -65)),
+                now = 9_000,
+                lastSeen = 9_000,
+                missing = false
+            )
+        )
     }
 
     @Test
-    fun `standing still with noise stays steady`() {
-        val t = LocateTracker()
-        var last: LocateReading? = null
-        for (i in 0..40) last = t.add(if (i % 2 == 0) -66 else -70, now = i * 200L)
-        assertEquals(LocateTrend.STEADY, last!!.trend)
-    }
-
-    @Test
-    fun `lost after silence`() {
-        val t = LocateTracker(lostAfterMs = 8_000)
-        assertFalse(t.isLost(100_000))
-        t.add(-60, 0)
-        assertFalse(t.isLost(5_000))
-        assertTrue(t.isLost(9_000))
-    }
-
-    @Test
-    fun `proximity and beep interval scale with signal`() {
-        assertEquals(0f, LocateTracker.proximity(-110f))
-        assertEquals(1f, LocateTracker.proximity(-30f))
-        assertTrue(LocateTracker.beepIntervalMs(1f) < LocateTracker.beepIntervalMs(0f))
-        assertEquals("Within arm’s reach", LocateTracker.distanceLabel(-45f))
-        assertEquals("Far or behind walls", LocateTracker.distanceLabel(-95f))
+    fun `tick interval scales with signal and stops when quiet`() {
+        assertTrue(
+            LocateSignals.tickIntervalMs(-40, LocateCue.CLOSER)!! <
+                LocateSignals.tickIntervalMs(-90, LocateCue.CLOSER)!!
+        )
+        assertNull(LocateSignals.tickIntervalMs(-40, LocateCue.QUIET))
     }
 }

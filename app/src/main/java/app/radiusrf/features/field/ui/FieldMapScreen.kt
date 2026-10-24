@@ -13,6 +13,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import app.radiusrf.core.lifecycle.HardwareLifecycleEffect
 import app.radiusrf.core.permission.PermissionGate
 import app.radiusrf.core.permission.PermissionUtils
 import app.radiusrf.core.ui.zd.ZdChip
@@ -31,7 +32,7 @@ import java.util.Locale
 fun FieldMapScreen(viewModel: FieldMapViewModel = hiltViewModel()) {
     PermissionGate(
         permissions = (PermissionUtils.locationPermissions() + PermissionUtils.blePermissions()).distinct(),
-        rationale = "The map uses this phone’s GPS and Bluetooth Remote ID. It does not download map tiles."
+        rationale = "The map uses this phone’s GPS and Bluetooth Remote ID. Street tiles stay on the phone if you import an archive."
     ) {
         FieldMapBody(viewModel)
     }
@@ -40,6 +41,12 @@ fun FieldMapScreen(viewModel: FieldMapViewModel = hiltViewModel()) {
 @Composable
 private fun FieldMapBody(viewModel: FieldMapViewModel) {
     LaunchedEffect(Unit) { viewModel.start() }
+    HardwareLifecycleEffect(
+        isActive = true,
+        onPause = viewModel::pauseHardware,
+        onResume = viewModel::resumeHardware,
+        onStop = viewModel::pauseHardware
+    )
     val state by viewModel.state.collectAsState()
     val marks = buildList {
         if (state.showSurvey) {
@@ -62,6 +69,11 @@ private fun FieldMapBody(viewModel: FieldMapViewModel) {
                 }
             }
         }
+        if (state.showCameras) {
+            state.cameras.forEach { site ->
+                add(PlotMark(site.lat, site.lon, if (site.kind.startsWith("ALPR")) Color(0xFFF0A020) else Color(0xFFC9A227)))
+            }
+        }
     }
     LazyColumn(
         Modifier.fillMaxSize(),
@@ -69,9 +81,10 @@ private fun FieldMapBody(viewModel: FieldMapViewModel) {
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         item {
-            ZdFootnote("Pins, path, and list are drawn from GPS logs and Remote ID on this phone. There is no street basemap and no network fetch. You are the accent dot. North is up.")
+            ZdFootnote("Pins and the path are this phone’s own logs. Cameras are public OpenStreetMap surveillance and ALPR nodes. Import an archive from the folder button to keep streets offline.")
         }
         state.remoteNote?.let { item { ZdFootnote(it) } }
+        state.cameraNote?.let { item { ZdFootnote(it) } }
         item {
             ZdChipRow(contentPadding = 0.dp) {
                 MapFace.entries.forEach { face ->
@@ -84,6 +97,7 @@ private fun FieldMapBody(viewModel: FieldMapViewModel) {
                 ZdChip("Survey", selected = state.showSurvey, onClick = viewModel::toggleSurvey)
                 ZdChip("Remote ID", selected = state.showRemote, onClick = viewModel::toggleRemote)
                 ZdChip("Bearing", selected = state.showBearing, onClick = viewModel::toggleBearing)
+                ZdChip("Cameras", selected = state.showCameras, onClick = viewModel::toggleCameras)
             }
         }
         item {
@@ -91,9 +105,9 @@ private fun FieldMapBody(viewModel: FieldMapViewModel) {
         }
         if (state.face != MapFace.LIST) {
             item {
-                LocalPlot(
-                    lat = state.lat,
-                    lon = state.lon,
+                FieldStreetMap(
+                    latitude = state.lat,
+                    longitude = state.lon,
                     marks = marks,
                     bearing = if (state.showBearing) state.bearing else null,
                     drawPath = state.face == MapFace.PATH
@@ -112,18 +126,22 @@ private fun FieldMapBody(viewModel: FieldMapViewModel) {
 
 private fun listRows(state: FieldMapState): List<Pair<String, String>> {
     val survey = if (!state.showSurvey) emptyList() else state.survey.take(30).map { row ->
-        (row.ssid ?: row.bssid) to "${row.radio} · ${fmt(row.lat)}, ${fmt(row.lng)} · ${row.rssi} dBm"
+        (if (row.isClient) row.bssid else row.ssid ?: row.bssid) to "${row.radio} · ${fmt(row.lat)}, ${fmt(row.lng)} · ${row.rssi} dBm"
     }
     val remote = if (!state.showRemote) emptyList() else state.remoteIds.map { sighting ->
         val aircraft = if (sighting.lat != null) "aircraft ${fmt(sighting.lat)}, ${fmt(sighting.lon)}" else "no aircraft fix"
         val operator = if (sighting.operatorLat != null) "${sighting.operatorKind ?: "Operator"} ${fmt(sighting.operatorLat)}, ${fmt(sighting.operatorLon)}" else "no operator fix"
         sighting.id to "$aircraft · $operator"
     }
-    return survey + remote
+    val cameras = if (!state.showCameras) emptyList() else state.cameras.map { site ->
+        site.name to "${site.kind} · ${fmt(site.lat)}, ${fmt(site.lon)}"
+    }
+    return survey + remote + cameras
 }
 
 private fun surveyColor(radio: String): Color = when (radio) {
     "WIFI" -> Color(0xFF7CDB6A)
+    "CLIENT" -> Color(0xFF3DDC97)
     "BLE", "BT" -> Color(0xFF6AA7FF)
     else -> Color(0xFFC9A227)
 }

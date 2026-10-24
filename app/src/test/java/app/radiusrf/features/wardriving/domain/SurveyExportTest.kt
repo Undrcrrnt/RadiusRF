@@ -59,6 +59,43 @@ class SurveyExportTest {
     }
 
     @Test
+    fun `clients stay attached to the access point in each export`() {
+        val client = wifi.copy(
+            bssid = "84:11:22:33:44:55",
+            ssid = "HomeNet",
+            rssi = -44,
+            capabilities = "aa:bb:cc:dd:ee:ff",
+            radio = SurveyRadio.CLIENT
+        )
+        assertTrue(client.isClient)
+        assertTrue(!client.isCell)
+        val rows = listOf(wifi, client)
+        val kismet = KismetExporter.csv(rows).trim().lines().drop(1)
+        assertEquals(1, kismet.size)
+
+        val wigle = WigleExporter.export(rows)
+        assertTrue(wigle.contains("84:11:22:33:44:55"))
+        assertTrue(wigle.contains("client of aa:bb:cc:dd:ee:ff"))
+        assertTrue(wigle.trim().lines().last().endsWith("CLIENT"))
+
+        val xml = KismetExporter.netxml(rows)
+        assertTrue(xml.contains("<client-mac>84:11:22:33:44:55</client-mac>"))
+        val clientAt = xml.indexOf("<client-mac>")
+        val networkAt = xml.indexOf("<BSSID>AA:BB:CC:DD:EE:FF</BSSID>")
+        assertTrue(clientAt > networkAt)
+        assertEquals(1, xml.split("<wireless-network").size - 1)
+
+        val airodump = AirodumpExporter.export(rows)
+        val stationHeader = airodump.indexOf("Station MAC")
+        val station = airodump.substring(stationHeader)
+        assertTrue(station.contains("84:11:22:33:44:55"))
+        assertTrue(station.contains("aa:bb:cc:dd:ee:ff"))
+
+        val pcap = SurveyPcap.write(rows).toString(Charsets.ISO_8859_1)
+        assertTrue(pcap.contains("HomeNet"))
+    }
+
+    @Test
     fun `cell identity matches the wigle sample shape`() {
         assertEquals("310260_41021_118273301", cellIdentity(310, 260, 41021, 118273301))
     }

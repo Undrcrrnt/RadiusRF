@@ -71,10 +71,17 @@ class UsbConnectionManager(
 
     private suspend fun requestPermission(manager: UsbManager, device: UsbDevice): Boolean =
         suspendCancellableCoroutine { cont ->
-            val action = "${context.packageName}.USB_PERMISSION"
+            val action = "${context.packageName}.USB_PERMISSION.${device.deviceId}"
             val receiver = object : BroadcastReceiver() {
                 override fun onReceive(ctx: Context, intent: Intent) {
                     if (intent.action != action) return
+                    val responseDevice = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        intent.getParcelableExtra(UsbManager.EXTRA_DEVICE, UsbDevice::class.java)
+                    } else {
+                        @Suppress("DEPRECATION")
+                        intent.getParcelableExtra(UsbManager.EXTRA_DEVICE)
+                    }
+                    if (responseDevice?.deviceId != device.deviceId) return
                     try {
                         context.unregisterReceiver(this)
                     } catch (_: IllegalArgumentException) {
@@ -98,7 +105,7 @@ class UsbConnectionManager(
             }
             val pendingIntent = PendingIntent.getBroadcast(
                 context,
-                0,
+                device.deviceId,
                 Intent(action).setPackage(context.packageName),
                 flags
             )

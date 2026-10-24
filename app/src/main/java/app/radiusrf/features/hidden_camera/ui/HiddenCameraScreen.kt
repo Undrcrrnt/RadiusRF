@@ -185,7 +185,7 @@ private fun IrFinderCard(active: Boolean, onToggle: () -> Unit, onDetect: (Camer
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text("IR lens finder", style = ZdType.Label, color = ZdColors.Text)
-                Text("Night-vision cameras glow as steady purple or white dots on the front camera.", style = ZdType.Caption, color = ZdColors.Text3)
+                Text("Night-vision cameras glow as steady purple or white dots on the rear camera.", style = ZdType.Caption, color = ZdColors.Text3)
             }
         }
         if (active) {

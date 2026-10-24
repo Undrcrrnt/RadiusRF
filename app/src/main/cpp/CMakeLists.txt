@@ -152,3 +152,84 @@ add_library(emptyset_rx SHARED
 target_include_directories(emptyset_rx PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(emptyset_rx PRIVATE devourer rtlsdr hackrf usb-1.0 log android)
 target_compile_options(emptyset_rx PRIVATE -fexceptions -frtti)
+
+set(AIRSPY_DIR "${PROJECT_ROOT}/third_party/airspy")
+add_library(airspy STATIC
+    ${AIRSPY_DIR}/airspy.c
+    ${AIRSPY_DIR}/iqconverter_float.c
+    ${AIRSPY_DIR}/iqconverter_int16.c
+)
+target_include_directories(airspy PUBLIC ${AIRSPY_DIR} ${LIBUSB_DIR}/libusb)
+target_compile_definitions(airspy PRIVATE _GNU_SOURCE)
+target_compile_options(airspy PRIVATE
+    -Wno-unused-parameter
+    -Wno-unused-function
+    -Wno-unused-variable
+    -fvisibility=hidden
+    -pthread
+)
+target_link_libraries(airspy PUBLIC usb-1.0 log)
+
+add_library(emptyset_airspy SHARED emptyset_airspy.cpp)
+target_include_directories(emptyset_airspy PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(emptyset_airspy PRIVATE airspy usb-1.0 log)
+target_compile_options(emptyset_airspy PRIVATE -fexceptions -frtti)
+
+set(AIRSPYHF_DIR "${PROJECT_ROOT}/third_party/airspyhf")
+add_library(airspyhf STATIC
+    ${AIRSPYHF_DIR}/airspyhf.c
+    ${AIRSPYHF_DIR}/iqbalancer.c
+)
+target_include_directories(airspyhf PUBLIC ${AIRSPYHF_DIR} ${LIBUSB_DIR}/libusb)
+target_compile_definitions(airspyhf PRIVATE _GNU_SOURCE)
+target_compile_options(airspyhf PRIVATE
+    -Wno-unused-parameter
+    -Wno-unused-function
+    -Wno-unused-variable
+    -fvisibility=hidden
+    -pthread
+)
+target_link_libraries(airspyhf PUBLIC usb-1.0 log)
+
+add_library(emptyset_airspyhf SHARED emptyset_airspyhf.cpp)
+target_include_directories(emptyset_airspyhf PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(emptyset_airspyhf PRIVATE airspyhf usb-1.0 log)
+target_compile_options(emptyset_airspyhf PRIVATE -fexceptions -frtti)
+
+set(HYDRASDR_DIR "${PROJECT_ROOT}/third_party/hydrasdr")
+add_library(hydrasdr STATIC
+    ${HYDRASDR_DIR}/hydrasdr.c
+    ${HYDRASDR_DIR}/hydrasdr_rfone.c
+    ${HYDRASDR_DIR}/hydrasdr_shared.c
+    ${HYDRASDR_DIR}/iqconverter.c
+    ${HYDRASDR_DIR}/iqconverter_decimator.c
+    ${HYDRASDR_DIR}/iqconverter_lut.c
+    ${HYDRASDR_DIR}/iqconverter_float.c
+    ${HYDRASDR_DIR}/iqconverter_float_opt.c
+    ${HYDRASDR_DIR}/iqconverter_float_opt33.c
+    ${HYDRASDR_DIR}/iqconverter_float_opt65.c
+    ${HYDRASDR_DIR}/iqconverter_float_opt83.c
+    ${HYDRASDR_DIR}/iqconverter_float_opt_dec.c
+    ${HYDRASDR_DIR}/iqconverter_int16.c
+    ${HYDRASDR_DIR}/iqconverter_int16_opt.c
+    ${HYDRASDR_DIR}/iqconverter_int16_opt33.c
+    ${HYDRASDR_DIR}/iqconverter_int16_opt65.c
+    ${HYDRASDR_DIR}/iqconverter_int16_opt83.c
+    ${HYDRASDR_DIR}/iqconverter_int16_opt_dec.c
+)
+target_include_directories(hydrasdr PUBLIC ${HYDRASDR_DIR} ${LIBUSB_DIR}/libusb)
+target_compile_definitions(hydrasdr PRIVATE _GNU_SOURCE)
+target_compile_options(hydrasdr PRIVATE
+    -Wno-unused-parameter
+    -Wno-unused-function
+    -Wno-unused-variable
+    -Wno-unused-but-set-variable
+    -fvisibility=hidden
+    -pthread
+)
+target_link_libraries(hydrasdr PUBLIC usb-1.0 log)
+
+add_library(emptyset_hydrasdr SHARED emptyset_hydrasdr.cpp)
+target_include_directories(emptyset_hydrasdr PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(emptyset_hydrasdr PRIVATE hydrasdr usb-1.0 log)
+target_compile_options(emptyset_hydrasdr PRIVATE -fexceptions -frtti)

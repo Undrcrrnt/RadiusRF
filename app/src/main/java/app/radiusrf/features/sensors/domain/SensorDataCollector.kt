@@ -38,8 +38,11 @@ class SensorDataCollector(
         Sensor.TYPE_LIGHT,
         Sensor.TYPE_PROXIMITY
     )
+    private val activeClients = java.util.Collections.newSetFromMap(java.util.IdentityHashMap<Any, Boolean>())
 
-    fun start() {
+    @Synchronized
+    fun start(owner: Any = this) {
+        if (!activeClients.add(owner) || activeClients.size > 1) return
         sensorTypes.forEach { type ->
             val sensor = sensorManager.getDefaultSensor(type)
             if (sensor != null) {
@@ -49,7 +52,9 @@ class SensorDataCollector(
         }
     }
 
-    fun stop() {
+    @Synchronized
+    fun stop(owner: Any = this) {
+        if (!activeClients.remove(owner) || activeClients.isNotEmpty()) return
         sensorManager.unregisterListener(this)
     }
 

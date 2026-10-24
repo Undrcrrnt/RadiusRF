@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.net.wifi.WifiManager
+import android.os.SystemClock
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -44,7 +45,11 @@ class WifiScanner(
                 val link = WifiLink.parse(frame.bytes)
                 if (link != null) {
                     synchronized(links) {
-                        links[link.client] = Triple(link.accessPoint, frame.rssi ?: -100, now)
+                        links[link.client.lowercase()] = Triple(link.accessPoint.lowercase(), frame.rssi ?: -100, now)
+                        if (links.size > 400) {
+                            val oldest = links.minByOrNull { it.value.third }?.key
+                            if (oldest != null) links.remove(oldest)
+                        }
                     }
                 }
                 val ap = BeaconFrame.parse(frame.bytes, frame.channel, frame.rssi) ?: return@collect
@@ -64,11 +69,10 @@ class WifiScanner(
                     val stale = seen.filterValues { now - it.second > 20_000L }.keys
                     stale.forEach { seen.remove(it) }
                     val liveLinks = synchronized(links) {
-                        links.entries.removeAll { now - it.value.third > 20_000L }
                         links.entries.groupBy { it.value.first }
                     }
                     seen.values.map { (ap, _) ->
-                        val clients = liveLinks[ap.bssid].orEmpty().map { entry ->
+                        val clients = liveLinks[ap.bssid.lowercase()].orEmpty().map { entry ->
                             WifiClient(entry.key, entry.value.second, "Client")
                         }
                         ap.copy(clients = clients)
@@ -95,7 +99,8 @@ class WifiScanner(
     private fun phoneScan(): Flow<List<WifiAccessPoint>> = callbackFlow {
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(ctx: Context?, intent: Intent?) {
-                trySend(phoneResults())
+                val updated = intent?.getBooleanExtra(WifiManager.EXTRA_RESULTS_UPDATED, false) == true
+                if (updated) trySend(phoneResults())
             }
         }
 
@@ -106,7 +111,6 @@ class WifiScanner(
 
         @Suppress("DEPRECATION")
         wifiManager.startScan()
-        trySend(phoneResults())
 
         val refresh = launch {
             while (isActive) {
@@ -127,6 +131,8 @@ class WifiScanner(
         val self = runCatching { wifiManager.connectionInfo }.getOrNull()
         val selfBssid = self?.bssid
         val selfRssi = self?.rssi ?: -100
+        val nowWall = System.currentTimeMillis()
+        val nowElapsed = SystemClock.elapsedRealtime()
         return wifiManager.scanResults.map { result ->
             val clients = if (selfBssid != null && result.BSSID.equals(selfBssid, ignoreCase = true) && selfBssid != "02:00:00:00:00:00") {
                 listOf(WifiClient("This phone", selfRssi, "Client"))
@@ -140,7 +146,7 @@ class WifiScanner(
                 frequency = result.frequency,
                 capabilities = result.capabilities,
                 channelWidth = result.channelWidth,
-                heardAt = System.currentTimeMillis(),
+                heardAt = nowWall - (nowElapsed - result.timestamp / 1_000L).coerceAtLeast(0L),
                 clients = clients
             )
         }.sortedByDescending { it.rssi }

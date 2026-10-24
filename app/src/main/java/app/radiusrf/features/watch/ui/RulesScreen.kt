@@ -116,7 +116,6 @@ internal fun permissionsFor(rule: WatchRule): List<String> = buildList {
         }
     }
     if (rule.kind.sensors.contains(RuleSensor.WIFI)) addAll(PermissionUtils.wifiPermissions())
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) add(Manifest.permission.POST_NOTIFICATIONS)
 }.distinct()
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -197,7 +196,7 @@ fun RulesScreen(
             val newRule = WatchRule("new", RuleKind.CUSTOM_BLE)
             val perms = rememberMultiplePermissionsStateCompat(permissionsFor(newRule)) { granted ->
                 if (granted) viewModel.addCustom(rssi, minutes).also { message = null }
-                else message = "Custom rules need Bluetooth, location and notification permissions."
+                else message = "Custom rules need Bluetooth and location permissions."
             }
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 ZdButton(

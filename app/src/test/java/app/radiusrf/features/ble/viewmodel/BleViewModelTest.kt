@@ -11,9 +11,6 @@ import io.mockk.mockk
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
-import kotlinx.coroutines.test.advanceTimeBy
-import kotlinx.coroutines.test.runCurrent
-import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -78,12 +75,13 @@ class BleViewModelTest {
     }
 
     @Test
-    fun `scan auto-stops after thirty seconds`() = runTest(mainRule.dispatcher) {
+    fun `scan auto-stops after thirty seconds`() {
         every { repository.scan() } returns MutableSharedFlow()
         val vm = vm()
         vm.startScan()
 
-        advanceTimeBy(30_001); runCurrent()
+        mainRule.dispatcher.scheduler.advanceTimeBy(30_001)
+        mainRule.dispatcher.scheduler.runCurrent()
 
         assertFalse(vm.scanState.value.isScanning)
     }

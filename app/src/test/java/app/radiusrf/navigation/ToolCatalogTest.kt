@@ -19,7 +19,6 @@ class ToolCatalogTest {
         )
         val toolScreens = RadiusRfScreen.all.filterNot { it in topLevel }
 
-        assertEquals(28, tools.size)
         assertEquals(toolScreens.map { it.route }.toSet(), tools.map { it.route }.toSet())
         assertEquals(tools.size, tools.map { it.route }.distinct().size)
     }

@@ -14,6 +14,9 @@ data class BleDeviceType(
 object BleDeviceTypeIdentifier {
     private val namePatterns = listOf(
         Regex("(?i)(airpods|buds|earbuds|pods|jabra|jbl|beats|bose|sony|wf-|wh-)") to BleDeviceType("Audio", "headphones", TerminalCyan),
+        Regex("(?i)(ray-?ban|meta\\s*(view|glasses)|spectacles|vuzix)") to BleDeviceType("Glasses", "camera", TerminalAmber),
+        Regex("(?i)(gopro|hero\\s*\\d|insta360|v380)") to BleDeviceType("Camera", "camera", TerminalAmber),
+        Regex("(?i)(hc-0[5689]|jdy-\\d|hm-10|bt04|spp-ca)") to BleDeviceType("Serial", "bluetooth", TerminalAmber),
         Regex("(?i)(band|mi band|fitbit|garmin|watch|huawei band|amazfit|versa|charge)") to BleDeviceType("Fitness", "watch", TerminalGreen),
         Regex("(?i)(tile|airtag|smarttag|chipolo|nut|finder|tracker)") to BleDeviceType("Tracker", "location", TerminalAmber),
         Regex("(?i)(keyboard|mouse|trackpad|logitech|mx|k380)") to BleDeviceType("Input", "keyboard", TerminalCyan),

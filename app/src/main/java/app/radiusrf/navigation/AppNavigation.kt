@@ -74,7 +74,9 @@ import app.radiusrf.features.locate.ui.LocateScreen
 import app.radiusrf.features.onboarding.OnboardingScreen
 import app.radiusrf.features.rf_bug_sweeper.ui.RfBugSweeperScreen
 import app.radiusrf.features.search.SearchScreen
+import app.radiusrf.features.settings.PermissionsScreen
 import app.radiusrf.features.settings.SettingsScreen
+import app.radiusrf.features.settings.ThemePickerScreen
 import app.radiusrf.features.watch.ui.RulesScreen
 import app.radiusrf.features.sweep.domain.SweepPreset
 import app.radiusrf.features.sweep.ui.SweepPresetsScreen
@@ -82,7 +84,12 @@ import app.radiusrf.features.sweep.ui.SweepRunScreen
 import app.radiusrf.features.rogue_ap_detector.ui.RogueApScreen
 import app.radiusrf.features.field.ui.FieldMapScreen
 import app.radiusrf.features.field.ui.FoxHuntScreen
+import app.radiusrf.features.sdr.ui.IsmDecoderScreen
 import app.radiusrf.features.sdr.ui.SdrScreen
+import app.radiusrf.features.sdr.ui.TrafficRadioScreen
+import app.radiusrf.features.signatures.ui.SignatureWatchScreen
+import app.radiusrf.features.ftm.ui.FtmScreen
+import app.radiusrf.features.meshtastic.ui.MeshtasticScreen
 import app.radiusrf.features.sensors.ui.SensorScreen
 import app.radiusrf.features.signal_logger.ui.SignalLoggerScreen
 import app.radiusrf.features.tools.ToolsScreen
@@ -336,9 +343,20 @@ fun AppNavigation(shell: AppShellViewModel = hiltViewModel()) {
                     )
                 }
                 pushed(RadiusRfScreen.Settings.route, "/settings", "Settings", navController, emptyList()) {
-                    SettingsScreen(onOpenRules = { navController.navigate(RULES_ROUTE) }, onDataDeleted = {
-                        scope.launch { snackbarHostState.showSnackbar("All saved data deleted") }
-                    })
+                    SettingsScreen(
+                        onOpenRules = { navController.navigate(RULES_ROUTE) },
+                        onOpenThemes = { navController.navigate(THEMES_ROUTE) },
+                        onOpenPermissions = { navController.navigate(PERMISSIONS_ROUTE) },
+                        onDataDeleted = {
+                            scope.launch { snackbarHostState.showSnackbar("All saved data deleted") }
+                        }
+                    )
+                }
+                pushed(THEMES_ROUTE, "/settings/theme", "Theme", navController, emptyList()) {
+                    ThemePickerScreen()
+                }
+                pushed(PERMISSIONS_ROUTE, "/settings/permissions", "Permissions", navController, emptyList()) {
+                    PermissionsScreen()
                 }
 
                 composable(RULES_ROUTE) {
@@ -394,6 +412,11 @@ fun AppNavigation(shell: AppShellViewModel = hiltViewModel()) {
                 tool(RadiusRfScreen.DeauthDetector, navController) { DeauthDetectorScreen() }
                 tool(RadiusRfScreen.EmfMapper, navController) { EmfMapperScreen() }
                 tool(RadiusRfScreen.SignalLogger, navController) { SignalLoggerScreen() }
+                tool(RadiusRfScreen.SignatureWatch, navController) { SignatureWatchScreen() }
+                tool(RadiusRfScreen.Ftm, navController) { FtmScreen() }
+                tool(RadiusRfScreen.IsmDecoder, navController) { IsmDecoderScreen() }
+                tool(RadiusRfScreen.TrafficRadio, navController) { TrafficRadioScreen() }
+                tool(RadiusRfScreen.Meshtastic, navController) { MeshtasticScreen() }
 
                 composable(RadiusRfScreen.Sessions.route) {
                     SessionsScreen(
@@ -458,6 +481,8 @@ internal fun deviceRoute(key: String, label: String, kind: String): String =
     "device/${Uri.encode(key)}/${Uri.encode(label.ifBlank { " " })}/$kind"
 
 internal const val RULES_ROUTE = "rules"
+internal const val THEMES_ROUTE = "settings/theme"
+internal const val PERMISSIONS_ROUTE = "settings/permissions"
 
 /** Width where the layout switches to rail + panes (Material's "expanded" class). */
 private const val WIDE_DP = 840

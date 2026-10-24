@@ -140,8 +140,10 @@ object FeatureModule {
         @ApplicationContext context: Context,
         wifiManager: WifiManager,
         bluetoothManager: BluetoothManager?,
-        cellTowerAnalyzer: CellTowerAnalyzer
-    ): WardrivingCollector = WardrivingCollector(context, wifiManager, bluetoothManager, cellTowerAnalyzer)
+        cellTowerAnalyzer: CellTowerAnalyzer,
+        nic: WifiNicPreference,
+        usb: UsbWifiSession
+    ): WardrivingCollector = WardrivingCollector(context, wifiManager, bluetoothManager, cellTowerAnalyzer, nic, usb)
 
     @Provides
     @Singleton

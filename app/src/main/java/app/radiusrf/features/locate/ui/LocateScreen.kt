@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
@@ -27,8 +28,11 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -49,10 +53,13 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import app.radiusrf.core.lifecycle.HardwareLifecycleEffect
 import app.radiusrf.core.permission.PermissionGate
 import app.radiusrf.core.permission.PermissionUtils
 import app.radiusrf.core.ui.zd.ZdButton
 import app.radiusrf.core.ui.zd.ZdButtonVariant
+import app.radiusrf.core.ui.zd.ZdChip
+import app.radiusrf.core.ui.zd.ZdChipRow
 import app.radiusrf.core.ui.zd.ZdFootnote
 import app.radiusrf.core.ui.zd.ZdIcons
 import app.radiusrf.core.ui.zd.ZdSwitchRow
@@ -70,12 +77,22 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlin.math.min
 
+private enum class LocateFace(val label: String) {
+    SIGNAL("Signal"),
+    HEATMAP("Heatmap"),
+    MAP("Map")
+}
+
 @Composable
 fun LocateScreen(viewModel: LocateViewModel = hiltViewModel()) {
     val state by viewModel.state.collectAsState()
     val wifi = state.radio == LocateRadio.WIFI
     PermissionGate(
-        permissions = if (wifi) PermissionUtils.wifiPermissions() else PermissionUtils.blePermissions(),
+        permissions = if (wifi) {
+            PermissionUtils.wifiPermissions()
+        } else {
+            (PermissionUtils.blePermissions() + PermissionUtils.locationPermissions()).distinct()
+        },
         rationale = if (wifi) {
             "Locate follows one access point. Android requires location before the phone can scan Wi-Fi."
         } else {
@@ -83,6 +100,12 @@ fun LocateScreen(viewModel: LocateViewModel = hiltViewModel()) {
         }
     ) {
         LaunchedEffect(Unit) { viewModel.start() }
+        HardwareLifecycleEffect(
+            isActive = state.running,
+            onPause = viewModel::stop,
+            onResume = viewModel::start,
+            onStop = viewModel::stop
+        )
         Feedback(state)
         LocateContent(state, viewModel)
     }
@@ -119,6 +142,8 @@ private fun Feedback(state: LocateUiState) {
 
 @Composable
 private fun LocateContent(state: LocateUiState, viewModel: LocateViewModel) {
+    var face by rememberSaveable { mutableStateOf(LocateFace.SIGNAL) }
+    val scroll = rememberScrollState()
     val cueColor = cueColor(state.cue)
     val wifi = state.radio == LocateRadio.WIFI
     val hint = LocateSignals.hint(state.cue, wifi, state.sweepPace)
@@ -128,17 +153,21 @@ private fun LocateContent(state: LocateUiState, viewModel: LocateViewModel) {
         null
     }
 
+    val mapFace = face == LocateFace.HEATMAP || face == LocateFace.MAP
     Column(
         Modifier
             .fillMaxSize()
-            .verticalScroll(rememberScrollState())
+            .then(if (mapFace) Modifier else Modifier.verticalScroll(scroll))
             .padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 16.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(
             LocateSignals.label(state.cue),
             color = cueColor,
-            style = ZdType.Title.copy(fontSize = 28.sp, lineHeight = 34.sp),
+            style = ZdType.Title.copy(
+                fontSize = if (mapFace) 22.sp else 28.sp,
+                lineHeight = if (mapFace) 26.sp else 34.sp
+            ),
             textAlign = TextAlign.Center,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
@@ -149,17 +178,24 @@ private fun LocateContent(state: LocateUiState, viewModel: LocateViewModel) {
                     contentDescription = "${LocateSignals.label(state.cue)}. $hint"
                 }
         )
-        Spacer(Modifier.height(8.dp))
-        Text(
-            hint,
-            style = ZdType.BodySmall,
-            color = ZdColors.Text2,
-            textAlign = TextAlign.Center,
-            minLines = if (wifi) 3 else 2,
-            maxLines = 3,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.fillMaxWidth()
-        )
+        ZdChipRow(contentPadding = 0.dp) {
+            LocateFace.entries.forEach { option ->
+                ZdChip(option.label, selected = face == option, onClick = { face = option })
+            }
+        }
+        if (!mapFace) {
+            Spacer(Modifier.height(8.dp))
+            Text(
+                hint,
+                style = ZdType.BodySmall,
+                color = ZdColors.Text2,
+                textAlign = TextAlign.Center,
+                minLines = if (wifi) 3 else 2,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
         if (wifi) {
             val channel = state.channel.takeIf { it > 0 }?.let { "ch $it" } ?: "channel —"
             Text(
@@ -174,58 +210,129 @@ private fun LocateContent(state: LocateUiState, viewModel: LocateViewModel) {
             WifiNicPicker(
                 source = state.nic,
                 onSelect = viewModel::selectSource,
-                horizontalPadding = 0.dp
+                horizontalPadding = 0.dp,
+                showHeading = !mapFace
             )
         }
         Text(
             state.rssi?.toString() ?: "—",
-            style = ZdType.Display.copy(fontSize = 64.sp, lineHeight = 68.sp),
+            style = ZdType.Display.copy(
+                fontSize = if (mapFace) 52.sp else 64.sp,
+                lineHeight = if (mapFace) 56.sp else 68.sp
+            ),
             color = cueColor
         )
-        Text(
-            state.rssi?.let { "${LocateSignals.band(it)} · not a distance" } ?: "no live RSSI",
-            style = ZdType.Heading,
-            color = ZdColors.Text2
-        )
-        Text(
-            if (state.peakRssi > -127) "Loudest this locate  ${state.peakRssi} dBm" else "Loudest this locate  —",
-            style = ZdType.Mono,
-            color = ZdColors.Text
-        )
-        Text(
-            when {
-                heardAgo == null -> "last heard  —"
+        if (mapFace) {
+            val band = state.rssi?.let { LocateSignals.band(it) } ?: "no live RSSI"
+            val loudest = if (state.peakRssi > -127) "loudest ${state.peakRssi} dBm" else "loudest —"
+            val heard = when {
+                heardAgo == null -> "last heard —"
                 heardAgo < 60L -> "last heard ${heardAgo}s ago"
                 else -> "last heard ${heardAgo / 60L}m ago"
-            },
-            style = ZdType.Path,
-            color = ZdColors.Text3
-        )
-        LocateNeedle(
-            cue = state.cue,
-            color = cueColor,
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(220.dp)
-        )
-        Sparkline(state.samples, cueColor, Modifier.fillMaxWidth().height(56.dp))
-        Spacer(Modifier.height(8.dp))
-        state.error?.let { ZdFootnote(it, icon = ZdIcons.Warning) }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            ZdSwitchRow(
-                label = "Beep",
-                description = "Faster when louder",
-                checked = state.beep,
-                onCheckedChange = { viewModel.toggleBeep() },
-                modifier = Modifier.weight(1f)
+            }
+            Text(
+                "$band · $loudest · $heard",
+                style = ZdType.Caption,
+                color = ZdColors.Text2,
+                textAlign = TextAlign.Center,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.fillMaxWidth()
+            )
+        } else {
+            Text(
+                state.rssi?.let { "${LocateSignals.band(it)} · not a distance" } ?: "no live RSSI",
+                style = ZdType.Heading,
+                color = ZdColors.Text2
+            )
+            Text(
+                if (state.peakRssi > -127) "Loudest this locate  ${state.peakRssi} dBm" else "Loudest this locate  —",
+                style = ZdType.Mono,
+                color = ZdColors.Text
+            )
+            Text(
+                when {
+                    heardAgo == null -> "last heard  —"
+                    heardAgo < 60L -> "last heard ${heardAgo}s ago"
+                    else -> "last heard ${heardAgo / 60L}m ago"
+                },
+                style = ZdType.Path,
+                color = ZdColors.Text3
             )
         }
-        ZdSwitchRow(
-            label = "Vibrate",
-            description = "A tick with each beep",
-            checked = state.haptics,
-            onCheckedChange = { viewModel.toggleHaptics() }
+        when (face) {
+            LocateFace.SIGNAL -> LocateNeedle(
+                cue = state.cue,
+                color = cueColor,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(220.dp)
+            )
+            LocateFace.HEATMAP, LocateFace.MAP -> SignalMap(
+                samples = state.geoSamples,
+                currentLatitude = state.latitude,
+                currentLongitude = state.longitude,
+                showHeat = face == LocateFace.HEATMAP,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .clipToBounds()
+            )
+        }
+        Sparkline(
+            state.samples,
+            cueColor,
+            Modifier.fillMaxWidth().height(if (mapFace) 72.dp else 56.dp)
         )
+        if (mapFace) {
+            Text(
+                if (face == LocateFace.HEATMAP) {
+                    "The cloud marks where this phone heard the target. Blue is weak and red is strongest."
+                } else {
+                    "The line is this phone’s path while locating. It does not show the radio’s position."
+                },
+                style = ZdType.Caption,
+                color = ZdColors.Text3,
+                textAlign = TextAlign.Center,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+        Spacer(Modifier.height(if (mapFace) 4.dp else 8.dp))
+        state.error?.let { ZdFootnote(it, icon = ZdIcons.Warning) }
+        if (mapFace) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                ZdSwitchRow(
+                    label = "Beep",
+                    checked = state.beep,
+                    onCheckedChange = { viewModel.toggleBeep() },
+                    modifier = Modifier.weight(1f)
+                )
+                ZdSwitchRow(
+                    label = "Vibrate",
+                    checked = state.haptics,
+                    onCheckedChange = { viewModel.toggleHaptics() },
+                    modifier = Modifier.weight(1f)
+                )
+            }
+        } else {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                ZdSwitchRow(
+                    label = "Beep",
+                    description = "Faster when louder",
+                    checked = state.beep,
+                    onCheckedChange = { viewModel.toggleBeep() },
+                    modifier = Modifier.weight(1f)
+                )
+            }
+            ZdSwitchRow(
+                label = "Vibrate",
+                description = "A tick with each beep",
+                checked = state.haptics,
+                onCheckedChange = { viewModel.toggleHaptics() }
+            )
+        }
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
             ZdButton(
                 "Reset this locate",

@@ -7,8 +7,8 @@ object NativeHackrf {
 
     external fun open(fd: Int): String?
 
-    /** [lna] is 0–40 in steps of 8. [vga] is 0–62 in steps of 2. [amp] is 0 or 1. */
-    external fun configure(freqHz: Long, sampleRate: Int, lna: Int, vga: Int, amp: Int): String?
+    /** [lna] is 0–40 in steps of 8. [vga] is 0–62 in steps of 2. [amp] and [antenna] are 0 or 1. */
+    external fun configure(freqHz: Long, sampleRate: Int, lna: Int, vga: Int, amp: Int, antenna: Int): String?
 
     external fun read(buffer: ByteArray): Int
 

@@ -138,7 +138,7 @@ private fun EmfMapperContent(state: EmfMapperState, viewModel: EmfMapperViewMode
                 item { AxisReadout(state.currentReading) }
             }
             if (state.history.isNotEmpty()) {
-                item { HistoryGraph(state.history) }
+                item { HistoryGraph(state.history, state.baseline) }
             }
             item {
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -455,7 +455,7 @@ private fun AxisBar(label: String, value: Float, maxValue: Float, color: Color) 
 // ---------------------------------------------------------------------------
 
 @Composable
-private fun HistoryGraph(history: List<EmfReading>) {
+private fun HistoryGraph(history: List<EmfReading>, baseline: Float) {
     ZdCard(verticalSpacing = 0.dp) {
         Column {
             Text("Last 30 seconds", style = ZdType.Label, color = ZdColors.Text2)
@@ -467,7 +467,9 @@ private fun HistoryGraph(history: List<EmfReading>) {
                     .fillMaxWidth()
                     .height(150.dp)
             ) {
-                val maxMag = (history.maxOfOrNull { it.magnitude } ?: 100f).coerceAtLeast(80f)
+                val elevatedThreshold = baseline + 15f
+                val highThreshold = baseline + 40f
+                val maxMag = maxOf(history.maxOfOrNull { it.magnitude } ?: 100f, highThreshold + 5f, 80f)
                 val w = size.width
                 val h = size.height
 
@@ -483,8 +485,7 @@ private fun HistoryGraph(history: List<EmfReading>) {
                     )
                 }
 
-                // ELEVATED threshold line (deviation >15 from typical ~45uT baseline)
-                val elevatedThreshold = 60f // approximate elevated threshold
+                // ELEVATED threshold line (deviation >15 from the active baseline)
                 if (elevatedThreshold < maxMag) {
                     val elevatedY = h - (elevatedThreshold / maxMag) * h
                     drawLine(
@@ -496,8 +497,7 @@ private fun HistoryGraph(history: List<EmfReading>) {
                     )
                 }
 
-                // HIGH threshold line (deviation >40 from baseline ~45uT)
-                val highThreshold = 85f // approximate high threshold
+                // HIGH threshold line (deviation >40 from the active baseline)
                 if (highThreshold < maxMag) {
                     val highY = h - (highThreshold / maxMag) * h
                     drawLine(

@@ -1,10 +1,17 @@
 package app.radiusrf.features.locate.viewmodel
 
+import android.annotation.SuppressLint
+import android.location.Location
+import android.location.LocationListener
+import android.location.LocationManager
+import android.os.Bundle
+import android.os.SystemClock
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.radiusrf.features.ble.domain.BleScanner
 import app.radiusrf.features.locate.domain.LocateCue
+import app.radiusrf.features.locate.domain.GeoSignalSample
 import app.radiusrf.features.locate.domain.LocateRadio
 import app.radiusrf.features.locate.domain.LocateSample
 import app.radiusrf.features.locate.domain.LocateSignals
@@ -39,7 +46,11 @@ data class LocateUiState(
     val nic: WifiNicSource = WifiNicSource.PHONE,
     val beep: Boolean = true,
     val haptics: Boolean = true,
-    val error: String? = null
+    val error: String? = null,
+    val latitude: Double? = null,
+    val longitude: Double? = null,
+    val locationAccuracyMeters: Float? = null,
+    val geoSamples: List<GeoSignalSample> = emptyList()
 ) {
     val sweepPace: Boolean get() = radio == LocateRadio.WIFI && nic == WifiNicSource.PHONE
 }
@@ -50,7 +61,8 @@ class LocateViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val scanner: BleScanner,
     private val wifi: WifiScanner,
-    private val nic: WifiNicPreference
+    private val nic: WifiNicPreference,
+    private val locationManager: LocationManager
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(
@@ -66,6 +78,23 @@ class LocateViewModel @Inject constructor(
 
     private var scanJob: Job? = null
     private var clockJob: Job? = null
+    private var currentLocation: Location? = null
+    private val locationListener = object : LocationListener {
+        override fun onLocationChanged(location: Location) {
+            currentLocation = location
+            _state.update {
+                it.copy(
+                    latitude = location.latitude,
+                    longitude = location.longitude,
+                    locationAccuracyMeters = location.accuracy
+                )
+            }
+        }
+        @Deprecated("Legacy callback")
+        override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) = Unit
+        override fun onProviderEnabled(provider: String) = Unit
+        override fun onProviderDisabled(provider: String) = Unit
+    }
 
     init {
         viewModelScope.launch {
@@ -81,9 +110,16 @@ class LocateViewModel @Inject constructor(
         }
     }
 
+    @SuppressLint("MissingPermission")
     fun start() {
         if (scanJob?.isActive == true) return
         _state.update { it.copy(running = true, error = null, missing = false) }
+        runCatching {
+            locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1_000L, 1f, locationListener)
+            val last = locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER)
+                ?: locationManager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
+            if (last != null) locationListener.onLocationChanged(last)
+        }
         clockJob?.cancel()
         clockJob = viewModelScope.launch {
             while (isActive) {
@@ -98,6 +134,7 @@ class LocateViewModel @Inject constructor(
         stopListening()
         clockJob?.cancel()
         clockJob = null
+        runCatching { locationManager.removeUpdates(locationListener) }
         _state.update { it.copy(running = false) }
     }
 
@@ -110,7 +147,8 @@ class LocateViewModel @Inject constructor(
                 rssi = null,
                 missing = false,
                 cue = LocateCue.WAITING,
-                error = null
+                error = null,
+                geoSamples = emptyList()
             )
         }
     }
@@ -165,12 +203,29 @@ class LocateViewModel @Inject constructor(
         if (seenAt <= current.lastSeen && current.lastSeen != 0L) return
         val sample = LocateSample(seenAt, rssi)
         val samples = (current.samples + sample).takeLast(120)
+        val geoSamples = currentLocation
+            ?.takeIf {
+                it.accuracy <= MAX_MAP_ACCURACY_METERS &&
+                    SystemClock.elapsedRealtimeNanos() - it.elapsedRealtimeNanos <= MAX_LOCATION_AGE_NS
+            }
+            ?.let { location ->
+                val mapped = GeoSignalSample(
+                    timeMs = seenAt,
+                    latitude = location.latitude,
+                    longitude = location.longitude,
+                    accuracyMeters = location.accuracy,
+                    rssi = rssi
+                )
+                appendMapSample(current.geoSamples, mapped)
+            }
+            ?: current.geoSamples
         _state.update {
             it.copy(
                 rssi = rssi,
                 lastSeen = seenAt,
                 peakRssi = maxOf(it.peakRssi, rssi),
                 samples = samples,
+                geoSamples = geoSamples,
                 missing = false,
                 channel = channel ?: it.channel,
                 error = null
@@ -195,5 +250,22 @@ class LocateViewModel @Inject constructor(
 
     companion object {
         const val SCAN_WINDOW_MS = 60_000L
+        private const val MAX_MAP_ACCURACY_METERS = 50f
+        private const val MAX_LOCATION_AGE_NS = 15_000_000_000L
     }
+}
+
+private fun appendMapSample(
+    samples: List<GeoSignalSample>,
+    next: GeoSignalSample
+): List<GeoSignalSample> {
+    val last = samples.lastOrNull()
+    if (last != null) {
+        val distance = FloatArray(1)
+        Location.distanceBetween(last.latitude, last.longitude, next.latitude, next.longitude, distance)
+        if (distance[0] < 1.5f && next.timeMs - last.timeMs < 1_500L) {
+            return (samples.dropLast(1) + next).takeLast(800)
+        }
+    }
+    return (samples + next).takeLast(800)
 }

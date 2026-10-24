@@ -12,5 +12,6 @@ data class QrScanResultEntity(
     val contentType: String,
     val parsedContent: String?,
     val isThreat: Boolean = false,
+    val threatReason: String? = null,
     val timestamp: Long = System.currentTimeMillis()
 )

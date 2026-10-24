@@ -275,6 +275,15 @@ int mt_phy_set_channel(mt7610u_dev *d, int channel)
 {
 	if (channel <= 0 || channel > 196)
 		return -1;
+	bool supported = false;
+	for (size_t i = 0; i < ARRAY_SIZE(mt76x0_frequency_plan); i++) {
+		if (channel == mt76x0_frequency_plan[i].channel) {
+			supported = true;
+			break;
+		}
+	}
+	if (!supported)
+		return -1;
 	int is_5g = channel > 14;
 	uint16_t rf_bw_band = (uint16_t)((is_5g ? RF_A_BAND : RF_G_BAND) | RF_BW_20);
 	if (d->last_5g != is_5g) {

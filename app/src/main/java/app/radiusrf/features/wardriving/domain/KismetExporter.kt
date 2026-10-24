@@ -75,14 +75,53 @@ object KismetExporter {
             sb.appendLine("      <avg-lon>${lngs.average()}</avg-lon>")
             sb.appendLine("      <avg-alt>${group.map { it.altitude }.average()}</avg-alt>")
             sb.appendLine("    </gps-info>")
+            if (wifi) clientsOf(records, best.bssid).forEachIndexed { clientIndex, clientGroup ->
+                val client = clientGroup.maxBy { it.rssi }
+                sb.appendLine("""    <wireless-client number="${clientIndex + 1}" type="established">""")
+                sb.appendLine("      <client-mac>${xmlText(client.bssid)}</client-mac>")
+                sb.appendLine("      <snr-info>")
+                sb.appendLine("        <last_signal_dbm>${client.rssi}</last_signal_dbm>")
+                sb.appendLine("        <min_signal_dbm>${clientGroup.minOf { it.rssi }}</min_signal_dbm>")
+                sb.appendLine("        <max_signal_dbm>${clientGroup.maxOf { it.rssi }}</max_signal_dbm>")
+                sb.appendLine("      </snr-info>")
+                sb.appendLine("    </wireless-client>")
+            }
             sb.appendLine("  </wireless-network>")
         }
+        val known = records.filter { it.isWifi }.map { it.bssid.lowercase() }.toSet()
+        clients(records).filter { it.associatedBssid.orEmpty().lowercase() !in known }
+            .groupBy { it.associatedBssid.orEmpty().lowercase() }
+            .values
+            .forEachIndexed { index, group ->
+                val number = grouped(records).size + index + 1
+                val ap = group.first().associatedBssid.orEmpty()
+                sb.appendLine("""  <wireless-network number="$number" type="infrastructure" wep="false" cloaked="true">""")
+                sb.appendLine("    <SSID>")
+                sb.appendLine("""      <essid cloaked="true">${xmlText(group.first().ssid.orEmpty())}</essid>""")
+                sb.appendLine("    </SSID>")
+                sb.appendLine("    <BSSID>${xmlText(ap)}</BSSID>")
+                group.groupBy { it.bssid.lowercase() }.values.forEachIndexed { clientIndex, clientGroup ->
+                    val client = clientGroup.maxBy { it.rssi }
+                    sb.appendLine("""    <wireless-client number="${clientIndex + 1}" type="established">""")
+                    sb.appendLine("      <client-mac>${xmlText(client.bssid)}</client-mac>")
+                    sb.appendLine("      <snr-info>")
+                    sb.appendLine("        <last_signal_dbm>${client.rssi}</last_signal_dbm>")
+                    sb.appendLine("      </snr-info>")
+                    sb.appendLine("    </wireless-client>")
+                }
+                sb.appendLine("  </wireless-network>")
+            }
         sb.appendLine("</detection-run>")
         return sb.toString()
     }
 
     private fun grouped(records: List<WardrivingRecord>): List<List<WardrivingRecord>> =
-        records.groupBy { it.radio to it.bssid }.values.toList()
+        records.filter { !it.isClient }.groupBy { it.radio to it.bssid }.values.toList()
+
+    private fun clients(records: List<WardrivingRecord>): List<WardrivingRecord> = records.filter { it.isClient }
+
+    private fun clientsOf(records: List<WardrivingRecord>, bssid: String): List<List<WardrivingRecord>> =
+        clients(records).filter { it.associatedBssid.equals(bssid, ignoreCase = true) }.groupBy { it.bssid.lowercase() }.values.toList()
 
     private fun netType(record: WardrivingRecord): String = when {
         record.isWifi -> "infrastructure"

@@ -30,6 +30,7 @@ class SensorViewModel @Inject constructor(
     private val sensorDataCollector: SensorDataCollector
 ) : ViewModel() {
 
+    private val sensorOwner = Any()
     companion object {
         private const val AUTO_STOP_TIMEOUT_MS = 60_000L
     }
@@ -144,7 +145,7 @@ class SensorViewModel @Inject constructor(
     }
 
     fun startSensors() {
-        sensorDataCollector.start()
+        sensorDataCollector.start(sensorOwner)
         _isMonitoring.value = true
         _isPaused.value = false
         autoStopJob?.cancel()
@@ -174,7 +175,7 @@ class SensorViewModel @Inject constructor(
         if (!_isMonitoring.value) return
         autoStopJob?.cancel()
         autoStopJob = null
-        sensorDataCollector.stop()
+        sensorDataCollector.stop(sensorOwner)
         _isMonitoring.value = false
         _isPaused.value = true
     }
@@ -184,7 +185,7 @@ class SensorViewModel @Inject constructor(
     fun stopSensors() {
         autoStopJob?.cancel()
         autoStopJob = null
-        sensorDataCollector.stop()
+        sensorDataCollector.stop(sensorOwner)
         _isMonitoring.value = false
         _isPaused.value = false
     }

@@ -1,14 +1,22 @@
 package app.radiusrf.features.settings
 
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -18,16 +26,25 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.radiusrf.BuildConfig
 import app.radiusrf.R
 import app.radiusrf.core.database.AppDatabase
+import app.radiusrf.core.lifecycle.ScanBackground
+import app.radiusrf.core.permission.PermissionUtils
 import app.radiusrf.core.prefs.AppSettings
+import app.radiusrf.core.sessions.SessionRepository
+import app.radiusrf.features.wardriving.service.WardrivingScanService
+import app.radiusrf.features.watch.service.WatchService
+import app.radiusrf.features.maps.OfflineMapPanel
 import app.radiusrf.features.wifi.domain.WifiNicPreference
 import app.radiusrf.features.wifi.ui.WifiNicPicker
 import app.radiusrf.core.ui.zd.ZdButton
@@ -42,9 +59,12 @@ import app.radiusrf.core.ui.zd.ZdListRow
 import app.radiusrf.core.ui.zd.ZdSectionLabel
 import app.radiusrf.core.ui.zd.ZdSwitchRow
 import app.radiusrf.core.ui.zd.ZdTextField
+import app.radiusrf.ui.theme.AppPalette
+import app.radiusrf.ui.theme.AppThemes
 import app.radiusrf.ui.theme.ZdColors
 import app.radiusrf.ui.theme.ZdType
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -53,7 +73,9 @@ import javax.inject.Inject
 class SettingsViewModel @Inject constructor(
     val settings: AppSettings,
     val nic: WifiNicPreference,
-    private val database: AppDatabase
+    private val database: AppDatabase,
+    private val sessions: SessionRepository,
+    @ApplicationContext private val context: Context
 ) : ViewModel() {
 
     fun addTrusted(ssid: String) = settings.setTrustedNetworks(settings.trustedNetworks.value + ssid.trim())
@@ -61,8 +83,11 @@ class SettingsViewModel @Inject constructor(
 
     /** Wipes every scan, session, alert and log on this phone; settings stay. */
     fun deleteAllData(onDone: () -> Unit) {
+        ScanBackground.releaseAll(context)
+        context.stopService(Intent(context, WardrivingScanService::class.java))
+        context.stopService(Intent(context, WatchService::class.java))
         viewModelScope.launch(Dispatchers.IO) {
-            database.clearAllTables()
+            sessions.withWritesPaused { database.clearAllTables() }
             launch(Dispatchers.Main) { onDone() }
         }
     }
@@ -73,6 +98,8 @@ class SettingsViewModel @Inject constructor(
 @Composable
 fun SettingsScreen(
     onOpenRules: () -> Unit,
+    onOpenThemes: () -> Unit,
+    onOpenPermissions: () -> Unit,
     onDataDeleted: () -> Unit,
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
@@ -95,14 +122,40 @@ fun SettingsScreen(
             .padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        ZdSectionLabel("Wi-Fi radio")
-        ZdCard {
-            WifiNicPicker(
-                source = nic,
-                onSelect = viewModel.nic::select,
-                modifier = Modifier.padding(0.dp)
+        val selectedTheme = AppThemes.selected.value
+        ZdSectionLabel("Theme")
+        ZdListCard(listOf(selectedTheme)) { theme ->
+            ZdListRow(
+                title = theme.name,
+                titleMono = false,
+                leading = { ThemeSwatch(theme) },
+                showChevron = true,
+                onClick = onOpenThemes
             )
         }
+
+        ZdSectionLabel("Permissions")
+        ZdListCard(listOf(Unit)) {
+            val granted = grantedPermissionCount()
+            val total = PermissionUtils.toggleablePermissions().size
+            ZdListRow(
+                title = "Permissions",
+                titleMono = false,
+                subtitle = "$granted of $total on",
+                showChevron = true,
+                onClick = onOpenPermissions
+            )
+        }
+
+        ZdSectionLabel("Wi-Fi radio")
+        WifiNicPicker(
+            source = nic,
+            onSelect = viewModel.nic::select,
+            horizontalPadding = 0.dp,
+            showHeading = false
+        )
+
+        OfflineMapPanel()
 
         ZdSectionLabel("Privacy")
         ZdCard(verticalSpacing = 0.dp) {
@@ -230,6 +283,59 @@ fun SettingsScreen(
             dismissLabel = ""
         ) {
             Text(stringResource(R.string.ethical_message), style = ZdType.BodySmall, color = ZdColors.Text2)
+        }
+    }
+}
+
+@Composable
+fun ThemePickerScreen() {
+    val context = LocalContext.current
+    val selectedId = AppThemes.selected.value.id
+    Column(
+        Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 24.dp)
+    ) {
+        ZdListCard(AppThemes.all) { theme ->
+            ZdListRow(
+                title = theme.name,
+                titleMono = false,
+                leading = { ThemeSwatch(theme) },
+                trailing = {
+                    if (theme.id == selectedId) {
+                        Icon(
+                            ZdIcons.Check,
+                            contentDescription = "Selected",
+                            tint = ZdColors.Accent,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                },
+                onClick = { AppThemes.select(context, theme.id) }
+            )
+        }
+    }
+}
+
+@Composable
+private fun grantedPermissionCount(): Int {
+    val context = LocalContext.current
+    return PermissionUtils.toggleablePermissions().count {
+        ContextCompat.checkSelfPermission(context, it.name) == PackageManager.PERMISSION_GRANTED
+    }
+}
+
+@Composable
+private fun ThemeSwatch(theme: AppPalette) {
+    Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+        listOf(theme.bg, theme.accent, theme.info, theme.critical).forEach { color ->
+            Box(
+                Modifier
+                    .size(14.dp)
+                    .clip(RoundedCornerShape(3.dp))
+                    .background(color)
+            )
         }
     }
 }

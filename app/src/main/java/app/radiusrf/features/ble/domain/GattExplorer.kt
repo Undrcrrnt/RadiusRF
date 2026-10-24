@@ -52,6 +52,7 @@ class GattExplorer(
     // Operation serialization
     private val operationChannel = Channel<GattOperation>(Channel.UNLIMITED)
     private var currentDeferred: CompletableDeferred<GattOperationResult>? = null
+    @Volatile private var operationPipelineFailed = false
 
     // Public state
     private val _connectionState = MutableStateFlow(GattConnectionState())
@@ -66,6 +67,10 @@ class GattExplorer(
             for (operation in operationChannel) {
                 currentDeferred = operation.deferred
                 try {
+                    if (operationPipelineFailed) {
+                        operation.deferred.complete(GattOperationResult.Error("GATT operation timed out; reconnect first"))
+                        continue
+                    }
                     operation.execute()
                     val result = withTimeoutOrNull(OPERATION_TIMEOUT_MS) {
                         operation.deferred.await()
@@ -74,6 +79,8 @@ class GattExplorer(
                         operation.deferred.complete(
                             GattOperationResult.Error("Operation timed out after ${OPERATION_TIMEOUT_MS / 1000}s")
                         )
+                        operationPipelineFailed = true
+                        forceCloseGatt()
                     }
                 } catch (e: CancellationException) {
                     throw e
@@ -290,6 +297,7 @@ class GattExplorer(
 
     @SuppressLint("MissingPermission")
     fun connect(address: String) {
+        operationPipelineFailed = false
         val adapter = bluetoothManager?.adapter ?: run {
             _connectionState.value = _connectionState.value.copy(
                 error = "Bluetooth not available"
@@ -467,12 +475,21 @@ class GattExplorer(
     @SuppressLint("MissingPermission")
     fun close() {
         activeNotifications.clear()
-        gatt?.disconnect()
-        gatt?.close()
-        gatt = null
+        forceCloseGatt()
         operationChannel.close()
         scope.cancel()
         _connectionState.value = GattConnectionState()
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun forceCloseGatt() {
+        try {
+            gatt?.disconnect()
+            gatt?.close()
+        } catch (_: SecurityException) {
+        } finally {
+            gatt = null
+        }
     }
 
     // ---- Helpers ----

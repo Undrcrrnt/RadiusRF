@@ -3,6 +3,7 @@ package app.radiusrf.features.hidden_camera.ui
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
+import android.graphics.Matrix
 import android.view.ViewGroup
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
@@ -50,11 +51,20 @@ fun IrCameraView(
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val executor = remember { Executors.newSingleThreadExecutor() }
+    val binding = remember { IrCameraBinding() }
     var irSpotCount by remember { mutableIntStateOf(0) }
     var overlayBitmap by remember { mutableStateOf<Bitmap?>(null) }
+    var bindError by remember { mutableStateOf<String?>(null) }
 
     DisposableEffect(Unit) {
-        onDispose { executor.shutdown() }
+        binding.disposed = false
+        onDispose {
+            binding.disposed = true
+            binding.analysis?.clearAnalyzer()
+            val useCases = listOfNotNull(binding.preview, binding.analysis).toTypedArray()
+            if (useCases.isNotEmpty()) binding.provider?.unbind(*useCases)
+            executor.shutdown()
+        }
     }
 
     Box(modifier = modifier.fillMaxSize()) {
@@ -65,12 +75,13 @@ fun IrCameraView(
                         ViewGroup.LayoutParams.MATCH_PARENT,
                         ViewGroup.LayoutParams.MATCH_PARENT
                     )
-                    scaleType = PreviewView.ScaleType.FILL_CENTER
+                    scaleType = PreviewView.ScaleType.FIT_CENTER
                 }
 
                 val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
                 cameraProviderFuture.addListener({
                     val cameraProvider = cameraProviderFuture.get()
+                    if (binding.disposed) return@addListener
 
                     val preview = Preview.Builder().build().also {
                         it.surfaceProvider = previewView.surfaceProvider
@@ -97,15 +108,17 @@ fun IrCameraView(
                         }
 
                     try {
-                        cameraProvider.unbindAll()
                         cameraProvider.bindToLifecycle(
                             lifecycleOwner,
                             CameraSelector.DEFAULT_BACK_CAMERA,
                             preview,
                             imageAnalysis
                         )
-                    } catch (_: Exception) {
-                        // Camera binding failed
+                        binding.provider = cameraProvider
+                        binding.preview = preview
+                        binding.analysis = imageAnalysis
+                    } catch (e: Exception) {
+                        bindError = e.message ?: "Rear camera could not start"
                     }
                 }, ContextCompat.getMainExecutor(ctx))
 
@@ -126,8 +139,8 @@ fun IrCameraView(
 
         // Instructions overlay
         Text(
-            text = "Point camera slowly around the room.\nIR LEDs appear as bright white/purple dots.\n${if (irSpotCount > 0) "$irSpotCount bright spot(s) detected!" else "No IR spots detected"}",
-            color = if (irSpotCount > 0) TerminalRed else Color.White,
+            text = bindError ?: "Point camera slowly around the room.\nIR LEDs appear as bright white/purple dots.\n${if (irSpotCount > 0) "$irSpotCount bright spot(s) detected!" else "No IR spots detected"}",
+            color = if (bindError != null || irSpotCount > 0) TerminalRed else Color.White,
             style = MaterialTheme.typography.bodyMedium,
             textAlign = TextAlign.Center,
             modifier = Modifier
@@ -137,6 +150,13 @@ fun IrCameraView(
                 .padding(16.dp)
         )
     }
+}
+
+private class IrCameraBinding {
+    @Volatile var disposed = false
+    var provider: ProcessCameraProvider? = null
+    var preview: Preview? = null
+    var analysis: ImageAnalysis? = null
 }
 
 /**
@@ -189,7 +209,12 @@ private class IrSpotAnalyzer(
         val significantClusters = clusters.filter { it.size >= MIN_CLUSTER_SIZE }
 
         val overlay = if (significantClusters.isNotEmpty()) {
-            createOverlay(width, height, significantClusters)
+            val raw = createOverlay(width, height, significantClusters)
+            val rotation = image.imageInfo.rotationDegrees
+            if (rotation == 0) raw else {
+                Bitmap.createBitmap(raw, 0, 0, raw.width, raw.height, Matrix().apply { postRotate(rotation.toFloat()) }, true)
+                    .also { if (it !== raw) raw.recycle() }
+            }
         } else null
 
         onResult(significantClusters.size, overlay)

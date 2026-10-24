@@ -20,6 +20,7 @@ class EmfMapperViewModel @Inject constructor(
     private val sensorDataCollector: SensorDataCollector
 ) : ViewModel() {
 
+    private val sensorOwner = Any()
     private val metalDetector = MetalDetector()
     private val processor = EmfDataProcessor()
 
@@ -33,7 +34,7 @@ class EmfMapperViewModel @Inject constructor(
     init {
         // Check sensor availability on init
         viewModelScope.launch {
-            sensorDataCollector.start()
+            sensorDataCollector.start(sensorOwner)
             delay(200)
             val available = sensorDataCollector.magnetometer.value.isAvailable
             if (!available) {
@@ -42,7 +43,7 @@ class EmfMapperViewModel @Inject constructor(
                     error = "Magnetometer sensor not available on this device"
                 )
             }
-            sensorDataCollector.stop()
+            sensorDataCollector.stop(sensorOwner)
         }
     }
 
@@ -51,7 +52,7 @@ class EmfMapperViewModel @Inject constructor(
         if (!_state.value.sensorAvailable) return
 
         val keep = _state.value.isPaused
-        sensorDataCollector.start()
+        sensorDataCollector.start(sensorOwner)
         if (!keep) {
             metalDetector.reset()
             recordingStartTime = System.currentTimeMillis()
@@ -115,7 +116,7 @@ class EmfMapperViewModel @Inject constructor(
         recordingJob = null
         timerJob?.cancel()
         timerJob = null
-        sensorDataCollector.stop()
+        sensorDataCollector.stop(sensorOwner)
         _state.value = _state.value.copy(
             isRecording = false,
             isPaused = true,
@@ -130,7 +131,7 @@ class EmfMapperViewModel @Inject constructor(
         recordingJob = null
         timerJob?.cancel()
         timerJob = null
-        sensorDataCollector.stop()
+        sensorDataCollector.stop(sensorOwner)
 
         _state.value = _state.value.copy(
             isRecording = false,
@@ -149,7 +150,7 @@ class EmfMapperViewModel @Inject constructor(
         recordingJob = null
         timerJob?.cancel()
         timerJob = null
-        sensorDataCollector.stop()
+        sensorDataCollector.stop(sensorOwner)
         metalDetector.reset()
 
         _state.value = EmfMapperState(sensorAvailable = _state.value.sensorAvailable)
@@ -158,6 +159,6 @@ class EmfMapperViewModel @Inject constructor(
     override fun onCleared() {
         recordingJob?.cancel()
         timerJob?.cancel()
-        sensorDataCollector.stop()
+        sensorDataCollector.stop(sensorOwner)
     }
 }

@@ -42,8 +42,10 @@ class AlertCenterRepository @Inject constructor(
         )
     }
 
-    /** Alerts still waiting for the user to triage them. */
-    val openAlerts: Flow<List<UnifiedAlert>> = alerts.map { list -> list.filter { it.isOpen } }
+    /** Alerts still waiting for triage are queried independently so history limits cannot hide them. */
+    val openAlerts: Flow<List<UnifiedAlert>> = alertDao.observeOpen().map { entities ->
+        entities.mapNotNull { it.toUnifiedAlertOrNull() }
+    }
 
     suspend fun clearAll() = alertDao.clearAll()
 

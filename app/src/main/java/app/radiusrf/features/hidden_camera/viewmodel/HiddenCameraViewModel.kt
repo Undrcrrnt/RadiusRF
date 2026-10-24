@@ -40,6 +40,7 @@ class HiddenCameraViewModel @Inject constructor(
     private val demoBus: DemoDataBus
 ) : ViewModel() {
 
+    private val sensorOwner = Any()
     /** When the current run started; null when no run is in progress. */
     private var runStartedAt: Long? = null
 
@@ -77,7 +78,7 @@ class HiddenCameraViewModel @Inject constructor(
     fun pauseScan() {
         if (!_state.value.isScanning) return
         cancelScanJobs()
-        sensorDataCollector.stop()
+        sensorDataCollector.stop(sensorOwner)
         _state.value = _state.value.copy(isScanning = false, isPaused = true, activeMode = null)
     }
 
@@ -105,7 +106,7 @@ class HiddenCameraViewModel @Inject constructor(
             recordSession(started)
         }
         cancelScanJobs()
-        sensorDataCollector.stop()
+        sensorDataCollector.stop(sensorOwner)
         metalDetector.reset()
         _state.value = _state.value.copy(
             isScanning = false,
@@ -124,8 +125,19 @@ class HiddenCameraViewModel @Inject constructor(
     }
 
     fun addIrDetection(detection: CameraDetection) {
+        val current = _state.value.detections
+        val recentIndex = current.indexOfLast {
+            it.source == detection.source &&
+                it.title == detection.title &&
+                detection.timestamp - it.timestamp < IR_DEDUP_MS
+        }
+        val updated = if (recentIndex >= 0) {
+            current.toMutableList().apply { this[recentIndex] = detection }
+        } else {
+            current + detection
+        }.takeLast(MAX_DETECTIONS)
         _state.value = _state.value.copy(
-            detections = _state.value.detections + detection
+            detections = updated
         )
     }
 
@@ -222,7 +234,7 @@ class HiddenCameraViewModel @Inject constructor(
 
     private fun startMagneticScan() {
         magneticJob?.cancel()
-        sensorDataCollector.start()
+        sensorDataCollector.start(sensorOwner)
         magneticJob = viewModelScope.launch {
             sensorDataCollector.magnetometer.collect { reading ->
                 if (!reading.isAvailable || reading.values.isEmpty()) return@collect
@@ -327,5 +339,10 @@ class HiddenCameraViewModel @Inject constructor(
             networkSuspects = demo.count { it.source == DetectionSource.NETWORK },
             error = null
         )
+    }
+
+    private companion object {
+        const val IR_DEDUP_MS = 3_000L
+        const val MAX_DETECTIONS = 200
     }
 }

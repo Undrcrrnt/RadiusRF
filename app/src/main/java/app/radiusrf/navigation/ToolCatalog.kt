@@ -82,17 +82,22 @@ object ToolCatalog {
             ToolInfo(RadiusRfScreen.Usb, "USB Devices", "Inspect USB, flag BadUSB combos", "/tools/usb", ToolGroup.DETECT, HardwareRequirement.OTG, ZdIcons.Usb),
             ToolInfo(RadiusRfScreen.Camera, "QR Scanner", "Check codes for phishing before opening", "/tools/qr", ToolGroup.DETECT, HardwareRequirement.CAM, ZdIcons.Qr),
             ToolInfo(RadiusRfScreen.PrivacyScore, "Privacy Score", "16+ checks on your phone’s exposure", "/tools/privacy", ToolGroup.DETECT, HardwareRequirement.NONE, ZdIcons.ShieldCheck),
+            ToolInfo(RadiusRfScreen.SignatureWatch, "Signature Watch", "Find Hub, glasses, action cams, serial modules", "/tools/signatures", ToolGroup.DETECT, HardwareRequirement.MULTI, ZdIcons.Tracker),
 
             // Scan & discover
             ToolInfo(RadiusRfScreen.Wifi, "WiFi Analyzer", "Networks, channels and weak security", "/tools/wifi", ToolGroup.SCAN, HardwareRequirement.WIFI, ZdIcons.Wifi),
             ToolInfo(RadiusRfScreen.Ble, "BLE Scanner", "Devices, GATT explorer, JSON dumps", "/tools/ble", ToolGroup.SCAN, HardwareRequirement.BLE, ZdIcons.Bluetooth),
             ToolInfo(RadiusRfScreen.BluetoothClassic, "Bluetooth Classic", "Discovery, SDP services, SPP serial", "/tools/bt-classic", ToolGroup.SCAN, HardwareRequirement.BT, ZdIcons.Bluetooth),
-            ToolInfo(RadiusRfScreen.NetworkScanner, "Network Scanner", "Hosts, open ports, banners on your LAN", "/tools/network", ToolGroup.SCAN, HardwareRequirement.LAN, ZdIcons.Lan),
+            ToolInfo(RadiusRfScreen.NetworkScanner, "Network Scanner", "Hosts, ports, mDNS and SSDP on your LAN", "/tools/network", ToolGroup.SCAN, HardwareRequirement.LAN, ZdIcons.Lan),
             ToolInfo(RadiusRfScreen.ProximityRadar, "Proximity Radar", "Plot nearby devices by distance", "/tools/radar", ToolGroup.SCAN, HardwareRequirement.BLE, ZdIcons.Sweep),
+            ToolInfo(RadiusRfScreen.Ftm, "FTM Ranging", "802.11mc distance to nearby access points", "/tools/ftm", ToolGroup.SCAN, HardwareRequirement.WIFI, ZdIcons.Sweep),
+            ToolInfo(RadiusRfScreen.Meshtastic, "Meshtastic Listen", "Hear Meshtastic nodes without joining", "/tools/meshtastic", ToolGroup.SCAN, HardwareRequirement.BLE, ZdIcons.Radio),
             ToolInfo(RadiusRfScreen.WifiAware, "Wi-Fi Aware", "Router-less NAN peer discovery", "/tools/wifi-aware", ToolGroup.SCAN, HardwareRequirement.NAN, ZdIcons.Wifi),
             ToolInfo(RadiusRfScreen.Sdr, "SDR Radio", "RTL-SDR and HackRF spectrum, waterfall, and audio", "/tools/sdr", ToolGroup.SCAN, HardwareRequirement.OTG, ZdIcons.Radio),
+            ToolInfo(RadiusRfScreen.IsmDecoder, "ISM Decoder", "Name 315/433/868/915 MHz sensor bursts", "/tools/ism", ToolGroup.ANALYZE, HardwareRequirement.OTG, ZdIcons.Radio),
+            ToolInfo(RadiusRfScreen.TrafficRadio, "ADS-B / AIS", "Decode nearby aircraft and ships", "/tools/traffic", ToolGroup.ANALYZE, HardwareRequirement.OTG, ZdIcons.Radio),
             ToolInfo(RadiusRfScreen.FoxHunt, "Fox Hunt", "Bearing from the strongest heading", "/tools/foxhunt", ToolGroup.ANALYZE, HardwareRequirement.MULTI, ZdIcons.Crosshair),
-            ToolInfo(RadiusRfScreen.FieldMap, "Field Map", "Offline pins for surveys, Remote ID, and bearings", "/tools/field-map", ToolGroup.LOG, HardwareRequirement.GPS, ZdIcons.Map),
+            ToolInfo(RadiusRfScreen.FieldMap, "Field Map", "Survey pins, Remote ID, and mapped cameras", "/tools/field-map", ToolGroup.LOG, HardwareRequirement.GPS, ZdIcons.Map),
             ToolInfo(RadiusRfScreen.UsbCamera, "USB Camera", "UVC camera modes and preview", "/tools/usb-camera", ToolGroup.SCAN, HardwareRequirement.OTG, ZdIcons.Camera),
 
             // Analyze signals

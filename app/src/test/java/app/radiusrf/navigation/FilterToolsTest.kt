@@ -17,7 +17,7 @@ class FilterToolsTest {
     @Test
     fun `group filter keeps only that group`() {
         val result = filterTools(tools, ToolGroup.LOG, "", false, allAvailable)
-        assertEquals(setOf("Signal Logger", "Wardriving"), result.map { it.name }.toSet())
+        assertEquals(tools.filter { it.group == ToolGroup.LOG }.map { it.name }.toSet(), result.map { it.name }.toSet())
     }
 
     @Test

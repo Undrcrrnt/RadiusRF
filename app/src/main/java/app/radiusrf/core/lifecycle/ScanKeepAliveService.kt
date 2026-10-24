@@ -29,16 +29,20 @@ class ScanKeepAliveService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == ACTION_STOP_SCAN) {
-            ScanBackground.requestStop(this)
-            return START_NOT_STICKY
-        }
-        if (intent?.action == ACTION_STOP) {
+        if (intent == null) {
             stopSelf()
             return START_NOT_STICKY
         }
-        val label = intent?.getStringExtra(EXTRA_LABEL)?.ifBlank { null } ?: "Scan"
-        val mic = intent?.getBooleanExtra(EXTRA_MIC, false) == true &&
+        if (intent.action == ACTION_STOP_SCAN) {
+            ScanBackground.requestStop(this)
+            return START_NOT_STICKY
+        }
+        if (intent.action == ACTION_STOP) {
+            stopSelf()
+            return START_NOT_STICKY
+        }
+        val label = intent.getStringExtra(EXTRA_LABEL)?.ifBlank { null } ?: "Scan"
+        val mic = intent.getBooleanExtra(EXTRA_MIC, false) == true &&
             ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
         ensureChannel()
         try {
@@ -48,7 +52,7 @@ class ScanKeepAliveService : Service() {
             return START_NOT_STICKY
         }
         acquireWakeLock()
-        return START_STICKY
+        return START_NOT_STICKY
     }
 
     override fun onDestroy() {
@@ -59,8 +63,12 @@ class ScanKeepAliveService : Service() {
 
     private fun types(mic: Boolean): Int {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return 0
-        var types = ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION or
-            ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
+        var types = ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
+        val hasLocation = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) ==
+            PackageManager.PERMISSION_GRANTED ||
+            ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) ==
+            PackageManager.PERMISSION_GRANTED
+        if (hasLocation) types = types or ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
         if (mic && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             types = types or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
         }

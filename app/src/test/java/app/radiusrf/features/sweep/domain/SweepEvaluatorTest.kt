@@ -16,7 +16,12 @@ class SweepEvaluatorTest {
     private fun ap(ssid: String, bssid: String, caps: String = "[WPA2-PSK-CCMP][ESS]", rssi: Int = -60) =
         WifiAccessPoint(ssid, bssid, rssi, 2437, caps)
 
-    private val airTagUuid = "7dfc9000-7d1c-4951-86aa-8d9728f8d66c"
+    private fun findMy(address: String, rssi: Int) = BleDevice(
+        name = null,
+        address = address,
+        rssi = rssi,
+        manufacturerData = mapOf(0x004C to byteArrayOf(0x12, 0x08, 0, 1, 2, 3, 4, 5, 6, 7))
+    )
 
     @Test
     fun `open and WEP networks are low findings, secured ones are not`() {
@@ -33,8 +38,8 @@ class SweepEvaluatorTest {
 
     @Test
     fun `a strong tracker is high and likely in the room, a weak one is medium`() {
-        val near = BleDevice(null, "7D:1E:AA:40:9C:02", -60, listOf(airTagUuid))
-        val far = BleDevice(null, "7D:1E:AA:40:9C:03", -85, listOf(airTagUuid))
+        val near = findMy("7D:1E:AA:40:9C:02", -60)
+        val far = findMy("7D:1E:AA:40:9C:03", -85)
         val findings = evaluator.trackers(listOf(near, far)).findings.associateBy { it.key }
 
         assertEquals(FindingLevel.HIGH, findings.getValue(near.address).level)
@@ -45,7 +50,7 @@ class SweepEvaluatorTest {
 
     @Test
     fun `the in-room threshold is inclusive`() {
-        val edge = BleDevice(null, "7D:1E:AA:40:9C:04", SweepEvaluator.IN_ROOM_RSSI, listOf(airTagUuid))
+        val edge = findMy("7D:1E:AA:40:9C:04", SweepEvaluator.IN_ROOM_RSSI)
         assertEquals(FindingLevel.HIGH, evaluator.trackers(listOf(edge)).findings.single().level)
     }
 

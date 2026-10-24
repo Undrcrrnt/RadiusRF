@@ -284,6 +284,42 @@ fun ZdButton(
     }
 }
 
+/** Square icon button for a control row. [contentDescription] is the action name. */
+@Composable
+fun ZdIconAction(
+    icon: ImageVector,
+    contentDescription: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    variant: ZdButtonVariant = ZdButtonVariant.Secondary,
+    enabled: Boolean = true,
+    size: Dp = 40.dp
+) {
+    val (bg, fg, border) = when (variant) {
+        ZdButtonVariant.Primary -> Triple(ZdColors.Accent, ZdColors.OnAccent, ZdColors.Accent)
+        ZdButtonVariant.Secondary -> Triple(ZdColors.Surface2, ZdColors.Text, ZdColors.BorderStrong)
+        ZdButtonVariant.Danger -> Triple(ZdColors.CriticalBg, ZdColors.Critical, ZdColors.CriticalBorder)
+        ZdButtonVariant.Ghost -> Triple(Color.Transparent, ZdColors.Accent, Color.Transparent)
+    }
+    Box(
+        modifier = modifier
+            .size(size)
+            .clip(ZdButtonShape)
+            .background(if (enabled) bg else ZdColors.Surface2)
+            .border(1.dp, if (enabled) border else ZdColors.Border, ZdButtonShape)
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+            .semantics { this.contentDescription = contentDescription },
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            icon,
+            contentDescription = null,
+            tint = if (enabled) fg else ZdColors.Text3,
+            modifier = Modifier.size(18.dp)
+        )
+    }
+}
+
 /** 44 dp icon-only button used in headers. */
 @Composable
 fun ZdIconButton(
@@ -292,17 +328,18 @@ fun ZdIconButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     tint: Color = ZdColors.Text2,
-    badge: Int = 0
+    badge: Int = 0,
+    enabled: Boolean = true
 ) {
     Box(
         modifier = modifier
             .size(44.dp)
             .clip(RoundedCornerShape(12.dp))
-            .clickable(role = Role.Button, onClick = onClick)
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
             .semantics { this.contentDescription = contentDescription },
         contentAlignment = Alignment.Center
     ) {
-        Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(22.dp))
+        Icon(icon, contentDescription = null, tint = tint.copy(alpha = if (enabled) tint.alpha else 0.4f), modifier = Modifier.size(22.dp))
         if (badge > 0) ZdCountBadge(badge, Modifier.align(Alignment.TopEnd).offset(x = (-4).dp, y = 6.dp))
     }
 }
@@ -404,7 +441,8 @@ fun ZdChip(
     label: String,
     selected: Boolean,
     onClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    role: Role = Role.Button
 ) {
     val shape = RoundedCornerShape(18.dp)
     Box(
@@ -413,7 +451,7 @@ fun ZdChip(
             .clip(shape)
             .background(if (selected) ZdColors.Accent else ZdColors.Surface)
             .border(1.dp, if (selected) ZdColors.Accent else ZdColors.BorderStrong, shape)
-            .selectable(selected = selected, role = Role.Tab, onClick = onClick)
+            .selectable(selected = selected, role = role, onClick = onClick)
             .padding(horizontal = 14.dp),
         contentAlignment = Alignment.Center
     ) {

@@ -16,11 +16,16 @@ object WigleExporter {
         records.forEach { record ->
             val date = dateFormat.format(Date(record.timestamp))
             val (channel, frequency) = channelAndFrequency(record)
+            val auth = if (record.isClient) {
+                "client of ${record.associatedBssid.orEmpty()}"
+            } else {
+                record.capabilities.orEmpty()
+            }
             sb.appendLine(
                 listOf(
                     record.bssid,
                     record.ssid.orEmpty(),
-                    record.capabilities.orEmpty(),
+                    auth,
                     date,
                     channel,
                     frequency,
@@ -39,7 +44,7 @@ object WigleExporter {
     }
 
     private fun channelAndFrequency(record: WardrivingRecord): Pair<String, String> = when (record.radio) {
-        SurveyRadio.WIFI -> {
+        SurveyRadio.WIFI, SurveyRadio.CLIENT -> {
             val channel = if (record.frequency <= 0) 0 else {
                 val parsed = FrequencyUtils.frequencyToChannel(record.frequency)
                 if (parsed < 0) 0 else parsed

@@ -1,11 +1,13 @@
 package app.radiusrf.features.bluetooth_tracker.domain
 
 import app.radiusrf.features.ble.domain.BleDevice
+import app.radiusrf.features.signatures.domain.DeviceSignatures
 
 // ── Data Models ──────────────────────────────────────────────────────────────
 
 enum class TrackerType(val label: String) {
     FIND_MY("Find My"),
+    FIND_HUB("Find Hub"),
     AIRTAG("AirTag"),
     SMARTTAG("SmartTag"),
     TILE("Tile"),
@@ -87,6 +89,11 @@ class TrackerIdentifier {
         device.manufacturerData[CHIPOLO_COMPANY_ID]?.let { data ->
             val id = data.toHex().ifEmpty { device.address }
             return TrackerMatch(TrackerType.CHIPOLO, "chipolo:$id")
+        }
+        if (DeviceSignatures.isFindHub(device)) {
+            val id = device.manufacturerData[DeviceSignatures.GOOGLE_COMPANY_ID]?.toHex()?.ifEmpty { device.address }
+                ?: device.address
+            return TrackerMatch(TrackerType.FIND_HUB, "findhub:$id")
         }
         return null
     }

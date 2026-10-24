@@ -303,7 +303,13 @@ private fun SppTerminal(
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
             keyboardActions = KeyboardActions(onSend = { send(input) }),
             trailing = {
-                ZdIconButton(ZdIcons.Send, contentDescription = "Send", onClick = { send(input) }, tint = if (state.isConnected && input.isNotBlank()) ZdColors.Accent else ZdColors.Text3)
+                ZdIconButton(
+                    ZdIcons.Send,
+                    contentDescription = "Send",
+                    onClick = { send(input) },
+                    tint = ZdColors.Accent,
+                    enabled = state.isConnected && input.isNotBlank()
+                )
             },
             modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 16.dp)
         )

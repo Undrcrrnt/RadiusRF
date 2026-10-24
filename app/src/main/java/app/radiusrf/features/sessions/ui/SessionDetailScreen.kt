@@ -119,7 +119,7 @@ fun SessionDetailScreen(
         })
     }
     if (showRename) {
-        var place by rememberSaveable { mutableStateOf(s.place.orEmpty()) }
+        var place by rememberSaveable(s.id, s.place, showRename) { mutableStateOf(s.place.orEmpty()) }
         ZdDialog(
             title = "Where was this?",
             onDismiss = { showRename = false },

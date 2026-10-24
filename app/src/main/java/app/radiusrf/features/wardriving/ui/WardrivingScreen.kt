@@ -14,6 +14,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -33,12 +34,14 @@ import app.radiusrf.core.ui.zd.ZdMetric
 import app.radiusrf.core.ui.zd.ZdProportionRow
 import app.radiusrf.core.ui.zd.ZdScanControlBar
 import app.radiusrf.core.ui.zd.ZdSectionLabel
+import app.radiusrf.core.ui.zd.ZdSwitchRow
 import app.radiusrf.core.ui.zd.ZdSignal
 import app.radiusrf.core.ui.zd.ZdStatePanel
 import app.radiusrf.core.ui.zd.ZdTag
 import app.radiusrf.core.util.FrequencyUtils
 import app.radiusrf.core.util.SecurityType
 import androidx.compose.runtime.LaunchedEffect
+import app.radiusrf.features.wifi.ui.WifiNicPicker
 import app.radiusrf.features.wardriving.domain.ExportFormat
 import app.radiusrf.features.wardriving.domain.SurveyMode
 import app.radiusrf.features.wardriving.domain.SurveyRadio
@@ -57,7 +60,7 @@ fun WardrivingScreen(
     LaunchedEffect(mode) { viewModel.attach(mode) }
     PermissionGate(
         permissions = PermissionUtils.wardrivingPermissions(mode.bluetooth, mode.cellular),
-        rationale = "Logging a route needs GPS. Bluetooth and cellular logging ask for those radios too, and the background logger needs a notification."
+        rationale = "Logging a route needs GPS. Bluetooth and cellular logging ask for those radios too."
     ) {
         WardrivingContent(mode, viewModel)
     }
@@ -68,9 +71,11 @@ private val timeFormat = SimpleDateFormat("HH:mm", Locale.US)
 @Composable
 private fun WardrivingContent(mode: SurveyMode, viewModel: WardrivingViewModel) {
     val state by viewModel.state.collectAsState()
+    val nic by viewModel.nic.source.collectAsState()
     val context = LocalContext.current
     val stats = state.stats
     var pendingExport by remember { mutableStateOf<ExportFormat?>(null) }
+    var redactMacs by rememberSaveable { mutableStateOf(viewModel.redactDefault) }
 
     pendingExport?.let { format ->
         ExportNameDialog(
@@ -78,7 +83,7 @@ private fun WardrivingContent(mode: SurveyMode, viewModel: WardrivingViewModel) 
             onDismiss = { pendingExport = null },
             onConfirm = { name ->
                 pendingExport = null
-                viewModel.export(format, name) { uri ->
+                viewModel.export(format, name, redactMacs) { uri ->
                     val intent = Intent(Intent.ACTION_SEND).apply {
                         type = format.mime
                         putExtra(Intent.EXTRA_STREAM, uri)
@@ -100,7 +105,7 @@ private fun WardrivingContent(mode: SurveyMode, viewModel: WardrivingViewModel) 
             onResume = viewModel::resumeSession,
             onStop = viewModel::stopSession,
             runningLabel = "Logging · ${stats?.formattedDuration ?: "00:00"}",
-            runningDetail = "${mode.radiosLabel} · keeps running with the screen off",
+            runningDetail = "${mode.radiosLabel} · ${nic.label}",
             idleDetail = when {
                 state.otherSurvey != null -> "${state.otherSurvey} is logging · start replaces it"
                 state.records.isEmpty() -> "Walk, cycle or drive a route"
@@ -108,6 +113,7 @@ private fun WardrivingContent(mode: SurveyMode, viewModel: WardrivingViewModel) 
             },
             showBackground = false
         )
+        WifiNicPicker(source = nic, onSelect = viewModel::selectSource)
 
         if (state.records.isEmpty() && !state.isScanning && !state.isPaused) {
             ZdStatePanel(
@@ -136,6 +142,7 @@ private fun WardrivingContent(mode: SurveyMode, viewModel: WardrivingViewModel) 
                     val wifi = state.records.filter { it.isWifi }.map { it.bssid }.distinct().size
                     val bluetooth = state.records.filter { it.isBluetooth }.map { it.bssid }.distinct().size
                     val cells = state.records.filter { it.isCell }.map { it.bssid }.distinct().size
+                    val clients = state.records.filter { it.isClient }.map { it.bssid }.distinct().size
                     ZdCard {
                         Row {
                             when (mode) {
@@ -153,6 +160,7 @@ private fun WardrivingContent(mode: SurveyMode, viewModel: WardrivingViewModel) 
                                     ZdMetric("$cells", "Cells", Modifier.weight(1f))
                                 }
                             }
+                            ZdMetric("$clients", "Clients", Modifier.weight(1f))
                             ZdMetric("${stats.totalRecords}", "Records", Modifier.weight(1f))
                             ZdMetric(stats.formattedDuration, "Time", Modifier.weight(1f))
                         }
@@ -168,6 +176,14 @@ private fun WardrivingContent(mode: SurveyMode, viewModel: WardrivingViewModel) 
             state.exportStatus?.let { item { ZdFootnote(it, icon = ZdIcons.Check) } }
             if (!state.isScanning && state.session != null && state.records.isNotEmpty()) {
                 item { ZdSectionLabel("Export") }
+                item {
+                    ZdSwitchRow(
+                        label = "Redact MAC addresses",
+                        description = "Keeps vendor prefixes and hides device-specific bytes.",
+                        checked = redactMacs,
+                        onCheckedChange = { redactMacs = it }
+                    )
+                }
                 items(ExportFormat.entries.size) { index ->
                     val format = ExportFormat.entries[index]
                     ZdButton(
@@ -182,9 +198,19 @@ private fun WardrivingContent(mode: SurveyMode, viewModel: WardrivingViewModel) 
                     ZdFootnote("WiGLE, Kismet, and airodump-ng files open in Netseer. PCAPNG opens in Wireshark and Netseer. The PCAPNG is rebuilt from the log, not a raw capture.")
                 }
             }
-            if (state.records.isNotEmpty()) {
-                item { ZdSectionLabel("Latest", trailingText = "${state.records.size}") }
-                item { ZdListCard(state.records.takeLast(50).reversed()) { RecordRow(it) } }
+            if (state.records.any { it.isClient }) {
+                val clients = state.records.filter { it.isClient }
+                    .groupBy { it.bssid.lowercase() to it.associatedBssid.orEmpty().lowercase() }
+                    .values
+                    .map { it.maxBy(WardrivingRecord::timestamp) }
+                    .sortedByDescending { it.rssi }
+                item { ZdSectionLabel("Clients", trailingText = "${clients.size}") }
+                item { ZdListCard(clients) { RecordRow(it) } }
+            }
+            val networks = state.records.filter { !it.isClient }
+            if (networks.isNotEmpty()) {
+                item { ZdSectionLabel("Latest", trailingText = "${networks.size}") }
+                item { ZdListCard(networks.takeLast(50).reversed()) { RecordRow(it) } }
             }
             item { ZdFootnote("Runs as a foreground service with a notification, so it keeps logging with the screen off.") }
         }
@@ -195,7 +221,11 @@ private fun WardrivingContent(mode: SurveyMode, viewModel: WardrivingViewModel) 
 private fun RecordRow(record: WardrivingRecord) {
     val security = SecurityType.fromCapabilities(record.capabilities.orEmpty())
     val weak = record.isWifi && (security == SecurityType.OPEN || security == SecurityType.WEP)
-    val tag = if (record.isWifi) security.label.uppercase() else record.radio
+    val tag = when {
+        record.isClient -> "CLIENT"
+        record.isWifi -> security.label.uppercase()
+        else -> record.radio
+    }
     val channel = when {
         record.radio == SurveyRadio.WIFI && record.frequency > 0 ->
             "ch ${FrequencyUtils.frequencyToChannel(record.frequency)}"
@@ -203,8 +233,9 @@ private fun RecordRow(record: WardrivingRecord) {
         else -> null
     }
     ZdListRow(
-        title = record.ssid?.takeIf { it.isNotBlank() } ?: if (record.isWifi) "[hidden]" else record.bssid,
+        title = if (record.isClient) record.bssid else record.ssid?.takeIf { it.isNotBlank() } ?: if (record.isWifi) "[hidden]" else record.bssid,
         subtitle = listOfNotNull(
+            if (record.isClient) "Client of ${record.ssid?.takeIf { it.isNotBlank() } ?: record.associatedBssid ?: "an access point"}" else null,
             channel,
             "%.4f, %.4f".format(Locale.US, record.lat, record.lng),
             timeFormat.format(Date(record.timestamp))

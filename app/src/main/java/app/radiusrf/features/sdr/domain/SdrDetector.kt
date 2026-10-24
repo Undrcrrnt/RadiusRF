@@ -15,7 +15,10 @@ class SdrDetector(
                 deviceName = device.productName ?: device.deviceName,
                 chipset = entry.chipset,
                 isRtlSdr = entry.rtl,
-                isHackrf = entry.hackrf
+                isHackrf = entry.hackrf,
+                isAirspy = entry.airspy,
+                isAirspyHf = entry.airspyHf,
+                isHydra = entry.hydra
             )
         }
     }
@@ -24,18 +27,26 @@ class SdrDetector(
         val chipset: String,
         val family: String,
         val rtl: Boolean = false,
-        val hackrf: Boolean = false
+        val hackrf: Boolean = false,
+        val airspy: Boolean = false,
+        val airspyHf: Boolean = false,
+        val hydra: Boolean = false
     )
 
     companion object {
         private fun rtl(name: String) = Entry(name, "RTL-SDR", rtl = true)
         private fun hack(name: String) = Entry(name, "HackRF", hackrf = true)
+        private fun airspy(name: String) = Entry(name, "Airspy", airspy = true)
+        private fun airspyHf(name: String) = Entry(name, "Airspy HF+", airspyHf = true)
+        private fun hydra(name: String) = Entry(name, "HydraSDR", hydra = true)
         private fun sdr(name: String, family: String) = Entry(name, family)
 
         /**
          * USB identities of receivers Android SDR apps can open.
          * RTL-SDR ids are the osmocom librtlsdr table. HackRF One is 1d50:6089
          * and the Jawbreaker is 1d50:604b. Airspy R2 and Mini share 1d50:60a1.
+         * A legacy HydraSDR that still uses that same id is opened as an Airspy.
+         * Official HydraSDR RFOne is 38af:0001.
          */
         private val CATALOG: Map<Pair<Int, Int>, Entry> = mapOf(
             (0x0BDA to 0x2832) to rtl("RTL2832U"),
@@ -87,8 +98,9 @@ class SdrDetector(
             (0x1D50 to 0xCC15) to hack("rad1o"),
             (0x1FC9 to 0x000C) to sdr("HackRF DFU bootloader", "HackRF"),
 
-            (0x1D50 to 0x60A1) to sdr("Airspy R2 / Mini", "Airspy"),
-            (0x03EB to 0x800C) to sdr("Airspy HF+", "Airspy HF+"),
+            (0x1D50 to 0x60A1) to airspy("Airspy R2 / Mini"),
+            (0x03EB to 0x800C) to airspyHf("Airspy HF+"),
+            (0x38AF to 0x0001) to hydra("HydraSDR RFOne"),
 
             (0x16D0 to 0x0F32) to sdr("SDRplay RSP1", "SDRplay"),
             (0x1DF7 to 0x2500) to sdr("SDRplay RSP1", "SDRplay"),

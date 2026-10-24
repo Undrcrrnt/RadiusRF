@@ -68,7 +68,7 @@ import kotlinx.coroutines.delay
 // ── Header ───────────────────────────────────────────────────────────────────
 
 /**
- * The terminal-path header on every screen: `le:~/tools/wifi $▌` over the screen title.
+ * The terminal-path header on every screen: `Radius:~/tools/wifi $▌` over the screen title.
  * Pass [onBack] on pushed screens; top-level tabs have no back button.
  */
 @Composable
@@ -94,7 +94,7 @@ fun ZdHeader(
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clearAndSetSemantics { }) {
                 Text(
                     text = buildAnnotatedString {
-                        withStyle(SpanStyle(color = ZdColors.Accent)) { append("le:~") }
+                        withStyle(SpanStyle(color = ZdColors.Accent)) { append("Radius:~") }
                         append(path)
                         withStyle(SpanStyle(color = ZdColors.Accent)) { append(" $") }
                     },
@@ -171,7 +171,8 @@ fun ZdScanControlBar(
     showBackground: Boolean = true,
     backgroundLabel: String = "Scan",
     backgroundUsesMic: Boolean = false,
-    onBackgroundChange: ((Boolean) -> Unit)? = null
+    onBackgroundChange: ((Boolean) -> Unit)? = null,
+    compactControls: Boolean = true
 ) {
     val live = running && !paused
     val background = ScanBackground.enabled
@@ -185,7 +186,7 @@ fun ZdScanControlBar(
         val active = background && (running || paused)
         if (active) ScanBackground.hold(context, holder, backgroundLabel, backgroundUsesMic)
         else ScanBackground.release(context, holder)
-        onDispose { }
+        onDispose { ScanBackground.release(context, holder) }
     }
     Column(
         modifier = modifier
@@ -207,7 +208,7 @@ fun ZdScanControlBar(
                     if (live) LiveDot() else Box(Modifier.size(8.dp).clip(CircleShape).background(if (paused) ZdColors.Accent else ZdColors.Text3))
                     Text(
                         text = when {
-                            paused -> "Paused"
+                            paused -> if (compactControls) "Paused · ${runningLabel.substringAfter(" · ", runningLabel)}" else "Paused"
                             running -> runningLabel
                             else -> idleLabel
                         },
@@ -227,20 +228,34 @@ fun ZdScanControlBar(
                     Text(detail, style = ZdType.Caption, color = ZdColors.Text3, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
-            when {
-                paused -> {
-                    ZdButton("Continue", onClick = { (onResume ?: onStart)() }, variant = ZdButtonVariant.Primary, icon = ZdIcons.Play, height = 40.dp)
-                    ZdButton(stopLabel, onClick = onStop, variant = ZdButtonVariant.Danger, icon = ZdIcons.Stop, height = 40.dp)
-                }
-                running && onPause != null -> {
-                    ZdButton("Pause", onClick = onPause, variant = ZdButtonVariant.Secondary, icon = ZdIcons.Pause, height = 40.dp)
-                    ZdButton(stopLabel, onClick = onStop, variant = ZdButtonVariant.Danger, icon = ZdIcons.Stop, height = 40.dp)
-                }
-                running -> ZdButton(stopLabel, onClick = onStop, variant = ZdButtonVariant.Danger, icon = ZdIcons.Stop, height = 40.dp)
-                else -> ZdButton(startLabel, onClick = onStart, variant = ZdButtonVariant.Primary, icon = ZdIcons.Play, height = 40.dp)
+            if (!compactControls) {
+                ScanTextControls(
+                    live = live,
+                    running = running,
+                    paused = paused,
+                    onStart = onStart,
+                    onStop = onStop,
+                    onPause = onPause,
+                    onResume = onResume,
+                    startLabel = startLabel,
+                    stopLabel = stopLabel
+                )
             }
         }
-        if (showBackground) {
+        if (compactControls) {
+            ScanIconControls(
+                live = live,
+                running = running,
+                paused = paused,
+                onStart = onStart,
+                onStop = onStop,
+                onPause = onPause,
+                onResume = onResume,
+                showBackground = showBackground,
+                background = background,
+                onBackground = { ScanBackground.setEnabled(context, !background) }
+            )
+        } else if (showBackground) {
             ZdButton(
                 if (background) "Background on" else "Run in background",
                 onClick = { ScanBackground.setEnabled(context, !background) },
@@ -253,6 +268,79 @@ fun ZdScanControlBar(
     }
 }
 
+@Composable
+private fun RowScope.ScanTextControls(
+    live: Boolean,
+    running: Boolean,
+    paused: Boolean,
+    onStart: () -> Unit,
+    onStop: () -> Unit,
+    onPause: (() -> Unit)?,
+    onResume: (() -> Unit)?,
+    startLabel: String,
+    stopLabel: String
+) {
+    when {
+        paused -> {
+            ZdButton("Continue", onClick = { (onResume ?: onStart)() }, variant = ZdButtonVariant.Primary, icon = ZdIcons.Play, height = 40.dp)
+            ZdButton(stopLabel, onClick = onStop, variant = ZdButtonVariant.Danger, icon = ZdIcons.Stop, height = 40.dp)
+        }
+        live && onPause != null -> {
+            ZdButton("Pause", onClick = onPause, variant = ZdButtonVariant.Secondary, icon = ZdIcons.Pause, height = 40.dp)
+            ZdButton(stopLabel, onClick = onStop, variant = ZdButtonVariant.Danger, icon = ZdIcons.Stop, height = 40.dp)
+        }
+        running -> ZdButton(stopLabel, onClick = onStop, variant = ZdButtonVariant.Danger, icon = ZdIcons.Stop, height = 40.dp)
+        else -> ZdButton(startLabel, onClick = onStart, variant = ZdButtonVariant.Primary, icon = ZdIcons.Play, height = 40.dp)
+    }
+}
+
+@Composable
+private fun ScanIconControls(
+    live: Boolean,
+    running: Boolean,
+    paused: Boolean,
+    onStart: () -> Unit,
+    onStop: () -> Unit,
+    onPause: (() -> Unit)?,
+    onResume: (() -> Unit)?,
+    showBackground: Boolean,
+    background: Boolean,
+    onBackground: () -> Unit
+) {
+    val active = running || paused
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        ZdIconAction(
+            icon = ZdIcons.Play,
+            contentDescription = if (paused) "Continue" else "Start",
+            onClick = { if (paused) (onResume ?: onStart)() else onStart() },
+            enabled = !live,
+            variant = if (!live) ZdButtonVariant.Primary else ZdButtonVariant.Secondary
+        )
+        ZdIconAction(
+            icon = ZdIcons.Pause,
+            contentDescription = "Pause",
+            onClick = { onPause?.invoke() },
+            enabled = live && onPause != null,
+            variant = ZdButtonVariant.Secondary
+        )
+        ZdIconAction(
+            icon = ZdIcons.Stop,
+            contentDescription = "Stop",
+            onClick = onStop,
+            enabled = active,
+            variant = if (active) ZdButtonVariant.Danger else ZdButtonVariant.Secondary
+        )
+        if (showBackground) {
+            ZdIconAction(
+                icon = ZdIcons.Background,
+                contentDescription = if (background) "Background on" else "Run in background",
+                onClick = onBackground,
+                variant = if (background) ZdButtonVariant.Primary else ZdButtonVariant.Secondary
+            )
+        }
+    }
+}
+
 /**
  * Elapsed milliseconds since [running] last became true, ticking once a second; 0 when stopped.
  * Keeps scan timers in the UI so tools don't each need their own clock.
@@ -260,20 +348,33 @@ fun ZdScanControlBar(
 @Composable
 fun rememberRunClock(running: Boolean, hold: Boolean = false): Long {
     var startedAt by rememberSaveable { mutableStateOf<Long?>(null) }
+    var accumulatedMs by rememberSaveable { mutableLongStateOf(0L) }
+    var wasHeld by rememberSaveable { mutableStateOf(false) }
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(running, hold) {
         if (!running) {
             startedAt = null
+            accumulatedMs = 0L
+            wasHeld = false
             return@LaunchedEffect
         }
-        if (startedAt == null) startedAt = System.currentTimeMillis()
-        if (hold) return@LaunchedEffect
+        val current = System.currentTimeMillis()
+        if (hold) {
+            if (!wasHeld) {
+                startedAt?.let { accumulatedMs += (current - it).coerceAtLeast(0L) }
+                startedAt = null
+            }
+            wasHeld = true
+            return@LaunchedEffect
+        }
+        wasHeld = false
+        if (startedAt == null) startedAt = current
         while (true) {
             now = System.currentTimeMillis()
             delay(1_000)
         }
     }
-    return startedAt?.let { (now - it).coerceAtLeast(0L) } ?: 0L
+    return accumulatedMs + (startedAt?.let { (now - it).coerceAtLeast(0L) } ?: 0L)
 }
 
 /** "auto-stops in 0:18" style countdown text, never negative. */
@@ -305,7 +406,8 @@ fun ZdToolScanBar(
     showBackground: Boolean = true,
     backgroundLabel: String = verb,
     backgroundUsesMic: Boolean = false,
-    onBackgroundChange: ((Boolean) -> Unit)? = null
+    onBackgroundChange: ((Boolean) -> Unit)? = null,
+    compactControls: Boolean = true
 ) {
     val elapsed = rememberRunClock(running || paused, hold = paused)
     val timed = if (ScanBackground.enabled) null else autoStopMs
@@ -329,7 +431,8 @@ fun ZdToolScanBar(
         showBackground = showBackground,
         backgroundLabel = backgroundLabel,
         backgroundUsesMic = backgroundUsesMic,
-        onBackgroundChange = onBackgroundChange
+        onBackgroundChange = onBackgroundChange,
+        compactControls = compactControls
     )
 }
 

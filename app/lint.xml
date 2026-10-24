@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<lint>
+    <!-- Android Studio writes this machine-local SDK path; escaping it here is not app source. -->
+    <issue id="PropertyEscape">
+        <ignore path="**/local.properties" />
+    </issue>
+</lint>

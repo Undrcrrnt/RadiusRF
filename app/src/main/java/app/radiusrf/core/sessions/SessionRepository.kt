@@ -11,6 +11,8 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.map
 import java.util.UUID
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -23,6 +25,7 @@ class SessionRepository @Inject constructor(
     private val dao: SessionDao
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val writeMutex = Mutex()
 
     val sessions: Flow<List<Session>> = dao.observeAll().map { list -> list.map { it.toDomain() } }
 
@@ -43,8 +46,9 @@ class SessionRepository @Inject constructor(
     ): String? {
         if (items.isEmpty() && !keepEmpty) return null
         val id = UUID.randomUUID().toString()
-        dao.insertWithItems(
-            SessionEntity(
+        writeMutex.withLock {
+            dao.insertWithItems(
+                SessionEntity(
                 id = id,
                 tool = tool,
                 title = title,
@@ -55,8 +59,8 @@ class SessionRepository @Inject constructor(
                 findingCount = findingCount,
                 summary = summary
             ),
-            items.distinctBy { it.key }.map {
-                SessionItemEntity(
+                items.distinctBy { it.key }.map {
+                    SessionItemEntity(
                     sessionId = id,
                     itemKey = it.key,
                     label = it.label,
@@ -64,9 +68,10 @@ class SessionRepository @Inject constructor(
                     rssi = it.rssi,
                     detail = it.detail,
                     flagged = it.flagged
-                )
-            }
-        )
+                    )
+                }
+            )
+        }
         return id
     }
 
@@ -95,6 +100,9 @@ class SessionRepository @Inject constructor(
     suspend fun delete(id: String) = dao.delete(id)
 
     suspend fun deleteAll() = dao.deleteAll()
+
+    /** Runs destructive maintenance after queued session writes and blocks new writes until done. */
+    suspend fun <T> withWritesPaused(block: suspend () -> T): T = writeMutex.withLock { block() }
 
     /** Devices and networks seen in any session, matched on name or address. */
     suspend fun searchSeen(query: String): List<SeenDeviceRow> =

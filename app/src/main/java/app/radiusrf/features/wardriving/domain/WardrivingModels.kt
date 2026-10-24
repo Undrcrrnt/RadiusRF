@@ -16,7 +16,10 @@ data class WardrivingRecord(
 ) {
     val isWifi: Boolean get() = radio == SurveyRadio.WIFI
     val isBluetooth: Boolean get() = radio == SurveyRadio.BLE || radio == SurveyRadio.BT
-    val isCell: Boolean get() = !isWifi && !isBluetooth
+    val isClient: Boolean get() = radio == SurveyRadio.CLIENT
+    /** Access point this client was heard with. Set only for [SurveyRadio.CLIENT]. */
+    val associatedBssid: String? get() = capabilities?.takeIf { isClient && it.isNotBlank() }
+    val isCell: Boolean get() = !isWifi && !isBluetooth && !isClient
 }
 
 data class WardrivingSession(
@@ -59,6 +62,7 @@ object SurveyRadio {
     const val WIFI = "WIFI"
     const val BLE = "BLE"
     const val BT = "BT"
+    const val CLIENT = "CLIENT"
 }
 
 /** Which radios a wardriving tool logs. Every mode also stores a GPS fix with each sighting. */

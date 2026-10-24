@@ -7,9 +7,19 @@ import android.nfc.NfcAdapter
 import android.nfc.Tag
 import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import app.radiusrf.core.di.NfcTagBus
 import app.radiusrf.core.lifecycle.ScanBackground
@@ -18,7 +28,10 @@ import app.radiusrf.features.surfaces.TileRoutes
 import app.radiusrf.features.watch.data.WatchRuleStore
 import app.radiusrf.features.watch.service.WatchService
 import app.radiusrf.navigation.AppNavigation
+import app.radiusrf.ui.StartupSplash
+import app.radiusrf.ui.theme.AppThemes
 import app.radiusrf.ui.theme.RadiusRfTheme
+import kotlinx.coroutines.delay
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 
@@ -37,8 +50,12 @@ class MainActivity : ComponentActivity() {
     private var nfcAdapter: NfcAdapter? = null
     private var nfcPendingIntent: PendingIntent? = null
 
+    private companion object {
+        const val SPLASH_MS = 5_000L
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
-        installSplashScreen()
+        installSplashScreen().setOnExitAnimationListener { it.remove() }
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
@@ -49,9 +66,25 @@ class MainActivity : ComponentActivity() {
             PendingIntent.FLAG_MUTABLE
         )
 
+        AppThemes.load(this)
+        val coldStart = savedInstanceState == null
         setContent {
             RadiusRfTheme {
-                AppNavigation()
+                val openedAt = rememberSaveable { SystemClock.elapsedRealtime() }
+                var splash by rememberSaveable { mutableStateOf(coldStart) }
+                LaunchedEffect(splash) {
+                    if (!splash) return@LaunchedEffect
+                    val remaining = SPLASH_MS - (SystemClock.elapsedRealtime() - openedAt)
+                    if (remaining > 0) delay(remaining)
+                    splash = false
+                }
+                Box(Modifier.fillMaxSize()) {
+                    AppNavigation()
+                    if (splash) {
+                        BackHandler { }
+                        StartupSplash()
+                    }
+                }
             }
         }
 

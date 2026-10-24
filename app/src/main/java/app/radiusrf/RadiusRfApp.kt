@@ -2,6 +2,8 @@ package app.radiusrf
 
 import android.app.Application
 import app.radiusrf.core.alerts.AlertCenterRepository
+import app.radiusrf.core.database.AppDatabase
+import app.radiusrf.core.prefs.AppSettings
 import app.radiusrf.core.sessions.SessionRepository
 import app.radiusrf.features.surfaces.Widgets
 import app.radiusrf.features.watch.data.WatchRuleStore
@@ -22,12 +24,20 @@ class RadiusRfApp : Application() {
     @Inject lateinit var alerts: AlertCenterRepository
     @Inject lateinit var sessions: SessionRepository
     @Inject lateinit var watchRules: WatchRuleStore
+    @Inject lateinit var settings: AppSettings
+    @Inject lateinit var database: AppDatabase
 
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     @OptIn(FlowPreview::class)
     override fun onCreate() {
         super.onCreate()
+        appScope.launch {
+            val cutoff = System.currentTimeMillis() - settings.retentionMs
+            sessions.prune(settings.retentionMs)
+            database.wardrivingDao().deleteOlderThan(cutoff)
+            alerts.pruneResolved()
+        }
         // Keep home-screen widgets in step with alerts, sessions and watch rules while we're alive;
         // the widgets' own 30-minute refresh covers the rest.
         appScope.launch {

@@ -9,6 +9,7 @@ import androidx.lifecycle.viewModelScope
 import app.radiusrf.core.debug.DemoData
 import app.radiusrf.core.debug.DemoDataBus
 import app.radiusrf.core.debug.observeDemoRequests
+import app.radiusrf.core.prefs.AppSettings
 import app.radiusrf.features.wardriving.data.WardrivingRepository
 import app.radiusrf.features.wardriving.domain.ExportFormat
 import app.radiusrf.features.wardriving.domain.SurveyMode
@@ -18,6 +19,8 @@ import app.radiusrf.features.wardriving.domain.WardrivingSessionState
 import app.radiusrf.features.wardriving.domain.WardrivingState
 import app.radiusrf.features.wardriving.domain.WardrivingStats
 import app.radiusrf.features.wardriving.service.WardrivingScanService
+import app.radiusrf.features.wifi.domain.WifiNicPreference
+import app.radiusrf.features.wifi.domain.WifiNicSource
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
@@ -36,7 +39,9 @@ class WardrivingViewModel @Inject constructor(
     private val repository: WardrivingRepository,
     private val sessionState: WardrivingSessionState,
     @ApplicationContext private val appContext: Context,
-    private val demoBus: DemoDataBus
+    private val demoBus: DemoDataBus,
+    private val settings: AppSettings,
+    val nic: WifiNicPreference
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(WardrivingState())
@@ -46,6 +51,28 @@ class WardrivingViewModel @Inject constructor(
     private var observeJob: Job? = null
     private var watchJob: Job? = null
     private var demoBound = false
+    val redactDefault: Boolean get() = settings.redactExports.value
+
+    init {
+        viewModelScope.launch {
+            sessionState.failure.collect { message ->
+                if (!message.isNullOrBlank()) {
+                    _state.update {
+                        it.copy(
+                            error = message,
+                            isScanning = false,
+                            isPaused = false,
+                            session = it.session?.copy(isActive = false)
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    fun selectSource(source: WifiNicSource) {
+        nic.select(source)
+    }
 
     fun attach(mode: SurveyMode) {
         if (watchJob != null && this.mode == mode) return
@@ -118,7 +145,11 @@ class WardrivingViewModel @Inject constructor(
             putExtra(WardrivingScanService.EXTRA_SESSION_ID, sessionId)
             putExtra(WardrivingScanService.EXTRA_MODE, mode.name)
         }
-        appContext.startForegroundService(intent)
+        if (!startService(intent, foreground = true)) {
+            sessionState.stop()
+            _state.update { it.copy(isScanning = false, session = it.session?.copy(isActive = false)) }
+            return
+        }
         observeRecords(sessionId, startTime)
     }
 
@@ -130,7 +161,7 @@ class WardrivingViewModel @Inject constructor(
             putExtra(WardrivingScanService.EXTRA_SESSION_ID, session.id)
             putExtra(WardrivingScanService.EXTRA_MODE, mode.name)
         }
-        appContext.startService(intent)
+        if (!startService(intent, foreground = false)) return
         _state.update { it.copy(isScanning = false, isPaused = true, session = it.session?.copy(isActive = false)) }
     }
 
@@ -142,7 +173,7 @@ class WardrivingViewModel @Inject constructor(
             putExtra(WardrivingScanService.EXTRA_SESSION_ID, session.id)
             putExtra(WardrivingScanService.EXTRA_MODE, mode.name)
         }
-        appContext.startForegroundService(intent)
+        if (!startService(intent, foreground = true)) return
         _state.update { it.copy(isScanning = true, isPaused = false, session = it.session?.copy(isActive = true)) }
         if (observeJob?.isActive != true) observeRecords(session.id, session.startTime)
     }
@@ -162,7 +193,7 @@ class WardrivingViewModel @Inject constructor(
         observeJob?.cancel()
         observeJob = viewModelScope.launch {
             repository.getSessionRecords(sessionId).collect { records ->
-                val ordered = records.sortedBy { it.timestamp }
+                val ordered = records
                 _state.update {
                     it.copy(
                         records = ordered,
@@ -192,11 +223,16 @@ class WardrivingViewModel @Inject constructor(
         return "${mode.fileSlug}_${sessionId.take(8)}_${format.fileSuffix}"
     }
 
-    fun export(format: ExportFormat, fileName: String? = null, onExported: (Uri) -> Unit) {
+    fun export(
+        format: ExportFormat,
+        fileName: String? = null,
+        redactMacs: Boolean = settings.redactExports.value,
+        onExported: (Uri) -> Unit
+    ) {
         val sessionId = _state.value.session?.id ?: return
         viewModelScope.launch {
             try {
-                val bytes = repository.exportSession(sessionId, format)
+                val bytes = repository.exportSession(sessionId, format, redactMacs)
                 val exportsDir = File(appContext.cacheDir, "exports").apply { mkdirs() }
                 val fallback = suggestedExportName(format)
                 val file = File(exportsDir, app.radiusrf.core.sessions.ExportNames.clean(fileName ?: fallback, fallback))
@@ -210,6 +246,16 @@ class WardrivingViewModel @Inject constructor(
                 _state.update { it.copy(exportStatus = "Export failed: ${e.message}") }
             }
         }
+    }
+
+    private fun startService(intent: Intent, foreground: Boolean): Boolean = try {
+        if (foreground) appContext.startForegroundService(intent) else appContext.startService(intent)
+        true
+    } catch (error: Exception) {
+        _state.update {
+            it.copy(error = "Could not start background survey: ${error.message ?: "Android denied the service"}")
+        }
+        false
     }
 
     private fun computeStats(records: List<WardrivingRecord>, startTime: Long): WardrivingStats {

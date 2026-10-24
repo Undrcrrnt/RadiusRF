@@ -5,6 +5,7 @@
 
 static std::mutex g_rtl_mu;
 static rtlsdr_dev_t *g_rtl = nullptr;
+static int g_bias_on = 0;
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_app_radiusrf_features_sdr_domain_NativeRtl_open(
@@ -19,20 +20,30 @@ Java_app_radiusrf_features_sdr_domain_NativeRtl_open(
         g_rtl = nullptr;
         return env->NewStringUTF("RTL-SDR did not start");
     }
+    g_bias_on = 0;
     return nullptr;
 }
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_app_radiusrf_features_sdr_domain_NativeRtl_configure(
-        JNIEnv *env, jobject, jlong freq_hz, jint sample_rate, jint gain_tenths, jint ppm) {
+        JNIEnv *env, jobject, jlong freq_hz, jint sample_rate, jint gain_tenths, jint ppm,
+        jint bias_tee, jint direct_sampling) {
     std::lock_guard<std::mutex> lock(g_rtl_mu);
     if (g_rtl == nullptr) return env->NewStringUTF("RTL-SDR is not open");
     int r = rtlsdr_set_sample_rate(g_rtl, static_cast<uint32_t>(sample_rate));
     if (r < 0) return env->NewStringUTF("Sample rate was rejected");
-    if (freq_hz < 24000000LL) {
-        rtlsdr_set_direct_sampling(g_rtl, 1);
-    } else {
-        rtlsdr_set_direct_sampling(g_rtl, 0);
+    int sampling = direct_sampling;
+    if (sampling < 0) sampling = freq_hz < 24000000LL ? 1 : 0;
+    if (sampling < 0) sampling = 0;
+    if (sampling > 2) sampling = 2;
+    rtlsdr_set_direct_sampling(g_rtl, sampling);
+    // Driving GPIO 0 low on every tune reconfigures the pin and stops some dongles.
+    if (bias_tee) {
+        rtlsdr_set_bias_tee(g_rtl, 1);
+        g_bias_on = 1;
+    } else if (g_bias_on) {
+        rtlsdr_set_bias_tee(g_rtl, 0);
+        g_bias_on = 0;
     }
     if (gain_tenths < 0) {
         rtlsdr_set_tuner_gain_mode(g_rtl, 0);
@@ -70,4 +81,5 @@ Java_app_radiusrf_features_sdr_domain_NativeRtl_close(JNIEnv *, jobject) {
         rtlsdr_close(g_rtl);
         g_rtl = nullptr;
     }
+    g_bias_on = 0;
 }
