@@ -13,11 +13,10 @@ import app.radiusrf.core.prefs.AppSettings
 import app.radiusrf.features.wardriving.data.WardrivingRepository
 import app.radiusrf.features.wardriving.domain.ExportFormat
 import app.radiusrf.features.wardriving.domain.SurveyMode
-import app.radiusrf.features.wardriving.domain.WardrivingRecord
+import app.radiusrf.features.wardriving.domain.SurveyBoard
 import app.radiusrf.features.wardriving.domain.WardrivingSession
 import app.radiusrf.features.wardriving.domain.WardrivingSessionState
 import app.radiusrf.features.wardriving.domain.WardrivingState
-import app.radiusrf.features.wardriving.domain.WardrivingStats
 import app.radiusrf.features.wardriving.service.WardrivingScanService
 import app.radiusrf.features.wifi.domain.WifiNicPreference
 import app.radiusrf.features.wifi.domain.WifiNicSource
@@ -101,9 +100,7 @@ class WardrivingViewModel @Inject constructor(
                                 )
                             )
                         }
-                        if (observeJob?.isActive != true) {
-                            observeRecords(active.sessionId, active.startTime)
-                        }
+                        if (observeJob?.isActive != true) observeLive()
                     }
                     active != null -> {
                         observeJob?.cancel()
@@ -150,7 +147,7 @@ class WardrivingViewModel @Inject constructor(
             _state.update { it.copy(isScanning = false, session = it.session?.copy(isActive = false)) }
             return
         }
-        observeRecords(sessionId, startTime)
+        observeLive()
     }
 
     fun pauseSession() {
@@ -175,33 +172,24 @@ class WardrivingViewModel @Inject constructor(
         }
         if (!startService(intent, foreground = true)) return
         _state.update { it.copy(isScanning = true, isPaused = false, session = it.session?.copy(isActive = true)) }
-        if (observeJob?.isActive != true) observeRecords(session.id, session.startTime)
+        if (observeJob?.isActive != true) observeLive()
     }
 
-    private fun resumeObserving(sessionId: String, startTime: Long) {
-        _state.update {
-            it.copy(
-                session = WardrivingSession(id = sessionId, startTime = startTime, isActive = true),
-                isScanning = true,
-                otherSurvey = null
-            )
-        }
-        observeRecords(sessionId, startTime)
-    }
-
-    private fun observeRecords(sessionId: String, startTime: Long) {
-        observeJob?.cancel()
+    private fun observeLive() {
+        if (observeJob?.isActive == true) return
         observeJob = viewModelScope.launch {
-            repository.getSessionRecords(sessionId).collect { records ->
-                val ordered = records
+            sessionState.live.collect { live ->
+                val surveying = sessionState.active.value != null
+                if (!surveying && live.isEmpty) return@collect
                 _state.update {
                     it.copy(
-                        records = ordered,
+                        live = live,
+                        records = emptyList(),
+                        stats = live.stats,
                         session = it.session?.copy(
-                            recordCount = ordered.size,
-                            uniqueBssids = ordered.map { record -> record.bssid }.distinct().size
-                        ),
-                        stats = computeStats(ordered, startTime)
+                            recordCount = live.stats.totalRecords,
+                            uniqueBssids = live.stats.uniqueBssids
+                        )
                     )
                 }
             }
@@ -258,39 +246,26 @@ class WardrivingViewModel @Inject constructor(
         false
     }
 
-    private fun computeStats(records: List<WardrivingRecord>, startTime: Long): WardrivingStats {
-        val wifi = records.filter { it.isWifi }
-        val uniqueSsids = wifi.mapNotNull { it.ssid }.distinct().size
-        val uniqueBssids = records.map { it.bssid }.distinct().size
-        val openCount = wifi.count { cap ->
-            val capabilities = cap.capabilities ?: ""
-            capabilities.isEmpty() || capabilities == "[ESS]"
-        }
-        val securedCount = wifi.size - openCount
-        val durationMs = if (records.isNotEmpty()) System.currentTimeMillis() - startTime else 0L
-        return WardrivingStats(
-            totalRecords = records.size,
-            uniqueSsids = uniqueSsids,
-            uniqueBssids = uniqueBssids,
-            openCount = openCount,
-            securedCount = securedCount,
-            sessionDurationMs = durationMs
-        )
-    }
-
     private fun loadDemoData() {
         val demo = DemoData.wardrivingRecords
+        val board = SurveyBoard()
+        demo.forEach { board.note(it) }
+        board.addWritten(demo.size)
+        val start = System.currentTimeMillis() - DemoData.wardrivingStats.sessionDurationMs
+        val live = board.snapshot(start)
         _state.value = _state.value.copy(
             session = WardrivingSession(
                 id = "demo",
-                startTime = System.currentTimeMillis() - DemoData.wardrivingStats.sessionDurationMs,
-                recordCount = demo.size,
-                uniqueBssids = demo.map { it.bssid }.distinct().size,
+                startTime = start,
+                recordCount = live.stats.totalRecords,
+                uniqueBssids = live.stats.uniqueBssids,
                 isActive = false
             ),
-            records = demo,
-            stats = DemoData.wardrivingStats,
-            error = null
+            records = emptyList(),
+            live = live,
+            stats = live.stats,
+            error = null,
+            isScanning = false
         )
     }
 }

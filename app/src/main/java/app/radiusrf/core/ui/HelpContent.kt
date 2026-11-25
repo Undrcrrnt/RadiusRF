@@ -38,9 +38,10 @@ object HelpContent {
             steps = listOf(
                 "Tap Start and keep the phone with you as you move.",
                 "Watch for trackers that stay near you across places.",
+                "Tap Watch in the background to keep checking after you leave this screen.",
                 "Tap a tracker to see why it was flagged, or mark it as yours."
             ),
-            howItWorks = "Trackers advertise over Bluetooth Low Energy with a manufacturer ID or service UUID that identifies the brand. Their address rotates every few minutes, so RadiusRF follows them by signature and timing, not by MAC. A tracker that keeps reappearing while you move is the pattern that matters.",
+            howItWorks = "Trackers advertise over Bluetooth Low Energy with a manufacturer ID or service UUID that identifies the brand. Their address rotates every few minutes, so RadiusRF follows them by signature and timing, not by MAC. A Find My tag that is still with its owner stays quiet. A separated tag that shows up in new places is the pattern that matters. Background watching uses the follow-me rule and keeps the places on this phone.",
             legend = listOf(
                 HelpLegend(LegendMark.TAG_BAD, "HIGH", "Seen many times over a long period"),
                 HelpLegend(LegendMark.TAG_WARN, "MEDIUM", "Seen a few times; keep watching"),
@@ -48,7 +49,8 @@ object HelpContent {
             ),
             facts = listOf(
                 HelpFact("Your own tags show up too", "Mark them as yours so they stop alerting"),
-                HelpFact("Separated AirTags", "An AirTag away from its owner broadcasts differently, which is what gets flagged"),
+                HelpFact("Separated AirTags", "An AirTag away from its owner sets a status bit. Tags still with their owner stay at low risk and do not alert"),
+                HelpFact("Saved path", "Places at least 250 m apart are kept on this phone and listed under Where it was heard"),
                 HelpFact("Distance is a guess", "Estimated from signal strength; can be off by 2× indoors"),
                 HelpFact("Find Hub", "Unnamed Google Fast Pair / Find My Device advertisements are treated as Find Hub")
             )
@@ -242,7 +244,8 @@ object HelpContent {
                 HelpLegend(LegendMark.TAG_INFO, "LOW", "Minor or situational")
             ),
             facts = listOf(
-                HelpFact("Nothing leaves the phone", "Checks are read locally"),
+                HelpFact("Nothing leaves the phone", "Checks and the device readout are read locally"),
+                HelpFact("What any app can read", "Time zone, languages, screen, identifiers, paired names, and home-screen apps are listed beside the score. They do not change the score"),
                 HelpFact("Some checks need permissions", "Skipped ones don’t lower the score")
             )
         ),
@@ -329,6 +332,24 @@ object HelpContent {
             )
         ),
 
+        "connection_log" to FeatureHelp(
+            title = "Connection Log",
+            description = "This phone's apps, hosts, and a PCAP",
+            steps = listOf(
+                "Tap Start and allow the local VPN.",
+                "Read the app, the host, and the bytes for each connection.",
+                "Share PCAP to save the capture that is already on this phone.",
+                "Tap Stop so IPv4 uses the phone's normal connection again."
+            ),
+            howItWorks = "The phone routes its IPv4 through a VPN that stays on the device. RadiusRF forwards each connection and writes the app, the host, and the byte counts. The same packets go into a PCAP in the app's export folder. HTTPS stays encrypted. IPv6 stays on the phone's normal connection.",
+            facts = listOf(
+                HelpFact("This phone only", "Other devices on the network are not included"),
+                HelpFact("One VPN", "Android allows one VPN at a time, so stop any other VPN first"),
+                HelpFact("PCAP limit", "The capture stops growing at about 6 MB"),
+                HelpFact("Forwarded", "Apps are not blocked. Their traffic is passed through")
+            )
+        ),
+
         "ftm" to FeatureHelp(
             title = "FTM Ranging",
             description = "802.11mc distance to nearby access points",
@@ -354,6 +375,7 @@ object HelpContent {
             steps = listOf(
                 "Tap Start and hold the phone still.",
                 "Closer devices sit nearer the centre.",
+                "Pinch the radar, or tap + and −, to zoom the range. Tap Fit to show every device again.",
                 "Tap a dot for the device’s details."
             ),
             howItWorks = "Signal strength drops predictably with distance, so RSSI gives a rough range. Direction can’t be measured with a single antenna, so each device keeps a fixed angle and only its distance moves.",
@@ -408,7 +430,7 @@ object HelpContent {
             howItWorks = "Positions come from wardrive logs, OpenDroneID broadcasts, and the fox-hunt bearing already stored on the phone. Streets come from an imported OpenStreetMap archive, or from the network if you allow it. The Cameras layer pulls mapped surveillance and ALPR nodes from OpenStreetMap.",
             facts = listOf(
                 HelpFact("Offline streets", "Import an .mbtiles, .zip, .sqlite, or .gemf archive from Settings or the folder button on the map"),
-                HelpFact("Remote ID", "Aircraft and operator locations are whatever the broadcast included"),
+                HelpFact("Remote ID", "Bluetooth and Wi-Fi beacon broadcasts are shown together. Aircraft and operator locations are whatever the broadcast included"),
                 HelpFact("Cameras layer", "Public OSM tags only. Unmapped cameras do not appear.")
             )
         ),
@@ -460,17 +482,18 @@ object HelpContent {
 
         "sdr" to FeatureHelp(
             title = "SDR Radio",
-            description = "Tune an RTL-SDR or HackRF: spectrum, waterfall, and audio",
+            description = "Receive console for waterfall, audio, and decoders",
             steps = listOf(
-                "Plug an RTL-SDR or HackRF into a USB-OTG adapter, then open SDR Radio. The dongle is recognized and the spectrum starts. Allow the USB prompt the first time.",
-                "The spectrum and waterfall fill the screen. Drag sideways to tune, pinch to zoom, and drag the channel marker to listen there. Source, Demodulation, Recording, Display, and Settings are in the drawer. In landscape the drawer moves to the side.",
-                "Record IQ, sweep the band list, scan OpenDroneID, check phone GNSS, or export CoT."
+                "Plug in an RTL-SDR, HackRF, Airspy, Airspy HF+, or HydraSDR and tap Listen.",
+                "Pick Audio, Scan, Glass, Aircraft, Ships, APRS, Pager, ACARS, SubGHz, FT8, Drones, or Capture.",
+                "Drag the waterfall or type a frequency in MHz. A decoder app tunes itself."
             ),
-            howItWorks = "The dongle samples the radio and the phone draws the spectrum and waterfall, then demodulates audio. HackRF listens from 1 MHz to 6 GHz with LNA, VGA, and the RF amp. A strong peak is logged. GPS L1 compares that frequency with a nearby channel, and the phone GNSS watch looks for a drop in carrier-to-noise and gain. OpenDroneID reads the public Bluetooth Remote ID broadcast. Airspy, Airspy HF+, and HydraSDR listen in this build. SDRplay, LimeSDR, bladeRF, USRP, and ADALM-PLUTO are recognised only.",
+            howItWorks = "The dongle samples the radio and the phone draws the waterfall, then demodulates or decodes. Audio covers WFM, NFM, AM, USB, LSB, and CW. Aircraft reads 1090 MHz Mode S. Ships reads AIS. APRS reads 1200 baud packet. Pager reads POCSAG. ACARS reads 131.550 MHz. SubGHz names short bursts. FT8 tunes a standard USB frequency and leaves the message on the waterfall. Positions from aircraft and ships plot on a local chart. Nothing is transmitted.",
             facts = listOf(
-                HelpFact("Receive only", "It tunes and listens. It does not transmit"),
-                HelpFact("Remote ID", "Bluetooth OpenDroneID advertisements are listed with location when the broadcast includes one"),
-                HelpFact("CoT export", "Heard signals and Remote ID can be shared as Cursor on Target XML")
+                HelpFact("Status", "Beta test. The receive console is unfinished"),
+                HelpFact("Receive only", "The console tunes and listens. It does not transmit"),
+                HelpFact("Same radios", "RTL-SDR, HackRF, Airspy, Airspy HF+, and HydraSDR"),
+                HelpFact("Remote ID", "Drones listens for public OpenDroneID Bluetooth broadcasts")
             )
         ),
 
@@ -707,6 +730,32 @@ object HelpContent {
                 HelpFact("Clients", "A USB adapter logs devices heard talking to an access point, with the GPS fix"),
                 HelpFact("Cell rows", "Identified as LTE, NR, GSM, or the radio the phone reports"),
                 HelpFact("PCAPNG", "Wi-Fi beacons and Bluetooth advertisements. Cell sightings stay in the CSV and Kismet files")
+            )
+        ),
+        "run_compare" to FeatureHelp(
+            title = "Run Compare",
+            description = "Find devices that stayed with you across saved runs",
+            steps = listOf(
+                "In Wardriving, log one leg and stop. Start a new run for the next leg.",
+                "Open Run Compare and check two to four of those runs.",
+                "Tap Compare. The map draws each leg and the devices that kept up.",
+                "Use All to see every match, or one chip to see a single device.",
+                "Tap a card for every sighting: time, signal, name, and GPS fix.",
+                "Tap the trash button to delete a run you no longer need."
+            ),
+            howItWorks = "Each leg stays a wardriving run. Compare reads those logs. A match is a Wi-Fi or Bluetooth address heard on at least two selected runs, with fixes more than 150 m apart. A radio that never leaves a stop is left out. The map stays in its frame. Pinch to zoom and drag to move around the route. Dashed lines are your legs. Dots are the matching device. One chip connects that device's dots in time order.",
+            legend = listOf(
+                HelpLegend(LegendMark.TAG_WARN, "MATCH", "Heard on more than one leg and moved with the route"),
+                HelpLegend(LegendMark.TAG_INFO, "ALL", "Every match at once"),
+                HelpLegend(LegendMark.SIGNAL_STRONG, "", "Dashed line is the leg you logged")
+            ),
+            facts = listOf(
+                HelpFact("Collection stays in Wardriving", "Run Compare does not scan. It reads runs you already logged"),
+                HelpFact("150 m", "A device whose fixes all sit inside 150 m is treated as a place"),
+                HelpFact("Rotating addresses", "A phone that keeps changing its Wi-Fi or Bluetooth address will not stay one match"),
+                HelpFact("Your own radios", "A hotspot, watch, or headset you carry will match every leg. Open the card and check the name"),
+                HelpFact("Cells", "Towers are left out. They are too coarse to say a person stayed with you"),
+                HelpFact("Delete a run", "The trash button removes that saved log")
             )
         )
     )

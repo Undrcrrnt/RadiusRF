@@ -50,6 +50,7 @@ data class PrivacyScoreState(
     val failCount: Int = 0,
     val categoryScores: Map<CheckCategory, Int> = emptyMap(),
     val lastScanTime: Long? = null,
+    val exposure: List<ExposureFact> = emptyList(),
     val error: String? = null
 )
 

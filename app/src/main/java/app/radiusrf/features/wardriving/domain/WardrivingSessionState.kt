@@ -19,11 +19,23 @@ class WardrivingSessionState @Inject constructor() {
     private val _failure = MutableStateFlow<String?>(null)
     val failure: StateFlow<String?> = _failure
 
+    /** Latest addresses for the screen. Cleared when a new run starts, kept after it stops. */
+    val board = SurveyBoard()
+
+    private val _live = MutableStateFlow(SurveyLive())
+    val live: StateFlow<SurveyLive> = _live
+
     fun start(sessionId: String, mode: SurveyMode): Long {
         _failure.value = null
+        board.clear()
+        _live.value = SurveyLive()
         val startTime = System.currentTimeMillis()
         _active.value = ActiveSession(sessionId, startTime, mode)
         return startTime
+    }
+
+    fun publishLive(startTime: Long) {
+        _live.value = board.snapshot(startTime)
     }
 
     fun fail(message: String) {

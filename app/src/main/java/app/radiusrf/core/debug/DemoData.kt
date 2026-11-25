@@ -85,6 +85,7 @@ object DemoData {
         const val DEAUTH = "deauth_detector"
         const val SIGNAL_LOGGER = "signal_logger"
         const val WARDRIVING = "wardriving"
+        const val RUN_COMPARE = "run_compare"
         const val PROXIMITY_RADAR = "proximity_radar"
         const val SIGNATURE_WATCH = "signature_watch"
         const val FTM = "ftm"
@@ -101,7 +102,7 @@ object DemoData {
         Routes.WIFI, Routes.BLE, Routes.NFC, Routes.IR, Routes.UWB, Routes.WIFI_AWARE, Routes.SDR, Routes.USB_CAMERA,
         Routes.USB, Routes.BLUETOOTH_CLASSIC, Routes.BLUETOOTH_TRACKER, Routes.HIDDEN_CAMERA, Routes.ROGUE_AP,
         Routes.NETWORK_SCANNER, Routes.RF_BUG_SWEEPER, Routes.DEAUTH, Routes.SIGNAL_LOGGER, Routes.WARDRIVING,
-        Routes.PROXIMITY_RADAR, Routes.CELL_TOWER, Routes.GPS, Routes.ALERT_CENTER, Routes.SESSIONS,
+        Routes.PROXIMITY_RADAR, Routes.CELL_TOWER, Routes.GPS, Routes.ALERT_CENTER, Routes.SESSIONS, Routes.RUN_COMPARE,
         Routes.SIGNATURE_WATCH, Routes.FTM, Routes.ISM_DECODER, Routes.TRAFFIC_RADIO, Routes.MESHTASTIC
     )
 

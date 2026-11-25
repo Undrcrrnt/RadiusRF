@@ -16,7 +16,7 @@ object SearchIndex {
         val q = query.norm()
         if (q.isEmpty()) return emptyList()
         return all
-            .filter { "${it.name} ${it.job} ${it.requirement.tag}".norm().contains(q) }
+            .filter { "${it.name} ${it.job} ${it.status.orEmpty()} ${it.requirement.tag}".norm().contains(q) }
             // Name matches first, then prefix matches within them.
             .sortedWith(compareBy({ !it.name.norm().contains(q) }, { !it.name.norm().startsWith(q) }))
     }

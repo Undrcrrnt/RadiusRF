@@ -58,6 +58,7 @@ import app.radiusrf.features.ble.ui.GattExplorerScreen
 import app.radiusrf.features.bluetooth_classic.ui.BluetoothClassicScreen
 import app.radiusrf.features.bluetooth_tracker.ui.BluetoothTrackerScreen
 import app.radiusrf.features.camera.ui.QrScannerScreen
+import app.radiusrf.features.connection_log.ui.ConnectionLogScreen
 import app.radiusrf.features.celltower.ui.CellTowerScreen
 import app.radiusrf.features.dashboard.DashboardScreen
 import app.radiusrf.features.deauth_detector.ui.DeauthDetectorScreen
@@ -102,6 +103,7 @@ import app.radiusrf.features.usb.ui.UsbScreen
 import app.radiusrf.features.usbcamera.ui.UsbCameraScreen
 import app.radiusrf.features.uwb.ui.UwbScreen
 import app.radiusrf.features.wardriving.domain.SurveyMode
+import app.radiusrf.features.run_compare.ui.RunCompareScreen
 import app.radiusrf.features.wardriving.ui.WardrivingScreen
 import app.radiusrf.features.wifi.ui.WifiScreen
 import app.radiusrf.features.wifi_direct.ui.WifiDirectScreen
@@ -393,6 +395,7 @@ fun AppNavigation(shell: AppShellViewModel = hiltViewModel()) {
                 tool(RadiusRfScreen.Wardriving, navController) { WardrivingScreen(SurveyMode.WIFI) }
                 tool(RadiusRfScreen.WardrivingPlus, navController) { WardrivingScreen(SurveyMode.PLUS) }
                 tool(RadiusRfScreen.WardrivingPlusPlus, navController) { WardrivingScreen(SurveyMode.PLUS_PLUS) }
+                tool(RadiusRfScreen.RunCompare, navController) { RunCompareScreen() }
                 tool(RadiusRfScreen.WifiAware, navController) { WifiAwareScreen() }
                 tool(RadiusRfScreen.CellTower, navController) { CellTowerScreen() }
                 tool(RadiusRfScreen.UsbCamera, navController) { UsbCameraScreen() }
@@ -406,6 +409,7 @@ fun AppNavigation(shell: AppShellViewModel = hiltViewModel()) {
                 }
                 tool(RadiusRfScreen.RogueAp, navController) { RogueApScreen() }
                 tool(RadiusRfScreen.NetworkScanner, navController) { NetworkScannerScreen() }
+                tool(RadiusRfScreen.ConnectionLog, navController) { ConnectionLogScreen() }
                 tool(RadiusRfScreen.RfBugSweeper, navController) { RfBugSweeperScreen() }
                 tool(RadiusRfScreen.ProximityRadar, navController) { ProximityRadarScreen() }
                 tool(RadiusRfScreen.PrivacyScore, navController) { PrivacyScoreScreen() }
@@ -530,6 +534,7 @@ private fun NavGraphBuilder.tool(
             ZdHeader(
                 path = info?.path ?: "/tools/${screen.route}",
                 title = info?.name ?: screen.title,
+                status = info?.status,
                 onBack = { if (!navController.popBackStack()) navController.navigateTopLevel(RadiusRfScreen.Dashboard.route) }
             ) {
                 DemoDataAction(route = screen.route)

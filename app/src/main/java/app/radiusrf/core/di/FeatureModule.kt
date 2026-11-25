@@ -31,8 +31,10 @@ import app.radiusrf.core.usb.UsbConnectionManager
 import app.radiusrf.features.usb.domain.UsbDeviceManager
 import app.radiusrf.features.usbcamera.domain.UsbCameraDetector
 import app.radiusrf.features.uwb.domain.UwbService
+import app.radiusrf.features.run_compare.data.RunCompareRepository
 import app.radiusrf.features.wardriving.data.WardrivingRepository
 import app.radiusrf.features.wardriving.domain.WardrivingCollector
+import app.radiusrf.features.wardriving.domain.WardrivingSessionState
 import app.radiusrf.features.wifi.domain.UsbWifiSession
 import app.radiusrf.features.wifi.domain.WifiNicPreference
 import app.radiusrf.features.wifi.domain.WifiScanner
@@ -142,13 +144,19 @@ object FeatureModule {
         bluetoothManager: BluetoothManager?,
         cellTowerAnalyzer: CellTowerAnalyzer,
         nic: WifiNicPreference,
-        usb: UsbWifiSession
-    ): WardrivingCollector = WardrivingCollector(context, wifiManager, bluetoothManager, cellTowerAnalyzer, nic, usb)
+        usb: UsbWifiSession,
+        sessionState: WardrivingSessionState
+    ): WardrivingCollector = WardrivingCollector(context, wifiManager, bluetoothManager, cellTowerAnalyzer, nic, usb, sessionState)
 
     @Provides
     @Singleton
     fun provideWardrivingRepository(database: AppDatabase): WardrivingRepository =
         WardrivingRepository(database.wardrivingDao())
+
+    @Provides
+    @Singleton
+    fun provideRunCompareRepository(database: AppDatabase): RunCompareRepository =
+        RunCompareRepository(database.wardrivingDao())
 
     @Provides
     @Singleton

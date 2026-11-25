@@ -189,10 +189,14 @@ private fun ThreatStatusCard(
 @Composable
 private fun PinnedTile(tool: ToolInfo, modifier: Modifier = Modifier, onClick: () -> Unit) {
     ZdCard(modifier = modifier.heightIn(min = 96.dp), onClick = onClick) {
-        ZdIconTile(tool.icon)
+        ZdIconTile(
+            tool.icon,
+            tint = if (tool.status != null) ZdColors.Medium else ZdColors.Accent,
+            background = if (tool.status != null) ZdColors.MediumBg else ZdColors.AccentBg
+        )
         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(tool.name, style = ZdType.Label, color = ZdColors.Text, maxLines = 1)
-            Text(tool.job, style = ZdType.Caption, color = ZdColors.Text3, maxLines = 2)
+            Text(tool.name, style = ZdType.Label, color = if (tool.status != null) ZdColors.Medium else ZdColors.Text, maxLines = 1)
+            Text(tool.status ?: tool.job, style = ZdType.Caption, color = if (tool.status != null) ZdColors.Medium else ZdColors.Text3, maxLines = 2)
         }
     }
 }
@@ -209,10 +213,14 @@ private fun ResumeSection(lastUsed: LastUsedFeature?, onResume: (LastUsedFeature
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                ZdIconTile(tool?.icon ?: ZdIcons.Clock, tint = ZdColors.Text2, background = ZdColors.Surface2)
+                ZdIconTile(
+                    tool?.icon ?: ZdIcons.Clock,
+                    tint = if (tool?.status != null) ZdColors.Medium else ZdColors.Text2,
+                    background = if (tool?.status != null) ZdColors.MediumBg else ZdColors.Surface2
+                )
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text(tool?.name ?: last.title, style = ZdType.Label, color = ZdColors.Text)
-                    Text("Last tool you opened", style = ZdType.Caption, color = ZdColors.Text3)
+                    Text(tool?.name ?: last.title, style = ZdType.Label, color = if (tool?.status != null) ZdColors.Medium else ZdColors.Text)
+                    Text(tool?.status ?: "Last tool you opened", style = ZdType.Caption, color = if (tool?.status != null) ZdColors.Medium else ZdColors.Text3)
                 }
                 ZdButton("Open", onClick = { onResume(last) }, variant = ZdButtonVariant.Ghost, height = 40.dp)
             }

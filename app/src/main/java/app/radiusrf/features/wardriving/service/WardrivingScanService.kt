@@ -20,12 +20,14 @@ import app.radiusrf.features.wardriving.domain.WardrivingSessionState
 import app.radiusrf.features.wifi.domain.WifiNicPreference
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
 // Owns the GPS+WiFi collection loop directly so it keeps running independent of whatever screen
@@ -125,7 +127,9 @@ class WardrivingScanService : Service() {
                     sessionState.fail(error.message ?: "The Wi-Fi adapter stopped")
                     stopSelf()
                 }
-                .collect { records -> repository.saveRecords(id, records) }
+                .collect { records ->
+                    withContext(Dispatchers.IO) { repository.saveRecords(id, records) }
+                }
         }
     }
 

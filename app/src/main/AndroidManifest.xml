@@ -42,6 +42,7 @@
 
     <!-- Foreground service (wardriving) -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
@@ -72,6 +73,13 @@
     <uses-feature android:name="android.hardware.location.gps" android:required="false" />
     <uses-feature android:name="android.hardware.nfc.hce" android:required="false" />
 
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+    </queries>
+
     <application
         android:name=".RadiusRfApp"
         android:allowBackup="false"
@@ -97,6 +105,19 @@
             android:name=".features.watch.service.WatchService"
             android:foregroundServiceType="location|connectedDevice"
             android:exported="false" />
+
+        <service
+            android:name=".features.connection_log.service.OwnTrafficService"
+            android:exported="true"
+            android:foregroundServiceType="specialUse"
+            android:permission="android.permission.BIND_VPN_SERVICE">
+            <intent-filter>
+                <action android:name="android.net.VpnService" />
+            </intent-filter>
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Records this phone's own IPv4 connections while a local VPN forwards them." />
+        </service>
 
         <receiver
             android:name=".core.notify.NotificationActionReceiver"

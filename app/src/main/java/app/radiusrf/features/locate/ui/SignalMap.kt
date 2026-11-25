@@ -75,7 +75,9 @@ fun SignalMap(
             setTileSource(TileSourceFactory.MAPNIK)
             setMultiTouchControls(true)
             minZoomLevel = 3.0
-            maxZoomLevel = 20.0
+            // Street tiles stop around 19. Higher levels enlarge that tile so the
+            // heat, which is drawn from the GPS samples, can be read a couple of metres across.
+            maxZoomLevel = 23.0
             controller.setZoom(18.0)
             overlays += SignalOverlay(context.resources.displayMetrics.density)
             overlays += ScaleBarOverlay(this).apply {

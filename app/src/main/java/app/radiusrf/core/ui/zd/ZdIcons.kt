@@ -47,6 +47,7 @@ object ZdIcons {
     val Copy by lazy { stroke("Copy", "M9 9h11v11H9zM5 15H4V4h11v1") }
     val Refresh by lazy { stroke("Refresh", "M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6") }
     val Plus by lazy { stroke("Plus", "M12 5v14M5 12h14") }
+    val Minus by lazy { stroke("Minus", "M5 12h14") }
     val More by lazy { stroke("More", "M5 12h.01M12 12h.01M19 12h.01", width = 2.5f) }
     val Filter by lazy { stroke("Filter", "M4 5h16l-6 8v5l-4 2v-7z") }
     val Pin by lazy { stroke("Pin", "M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1L3.2 9.5l6.1-.9z") }

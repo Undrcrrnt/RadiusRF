@@ -37,6 +37,7 @@ import app.radiusrf.core.ui.zd.ZdToolScanBar
 import app.radiusrf.core.util.formatSpan
 import app.radiusrf.features.ble.domain.BleDistanceEstimator
 import app.radiusrf.features.bluetooth_tracker.domain.DetectedTracker
+import app.radiusrf.features.bluetooth_tracker.domain.OwnerState
 import app.radiusrf.features.bluetooth_tracker.domain.TrackingRisk
 import app.radiusrf.features.bluetooth_tracker.viewmodel.BluetoothTrackerViewModel
 import app.radiusrf.ui.theme.ZdColors
@@ -139,8 +140,33 @@ private fun BluetoothTrackerContent(viewModel: BluetoothTrackerViewModel, onOpen
                     icon = ZdIcons.Trash
                 )
             }
+            if (!state.backgroundWatching) {
+                item {
+                    ZdButton(
+                        "Watch in the background",
+                        onClick = viewModel::watchInBackground,
+                        variant = ZdButtonVariant.Secondary,
+                        icon = ZdIcons.Tracker
+                    )
+                }
+            }
+            val followed = state.savedPlaces.filter { it.points.size >= 2 && it.owner != OwnerState.WITH_OWNER }
+            if (followed.isNotEmpty()) {
+                item { ZdSectionLabel("Where it was heard", trailingText = "${followed.size}") }
+                item {
+                    ZdListCard(followed) { trail ->
+                        ZdListRow(
+                            title = trail.label,
+                            titleMono = false,
+                            subtitle = trail.points.joinToString("  ·  ") { point ->
+                                "%.5f, %.5f".format(point.lat, point.lon)
+                            }
+                        )
+                    }
+                }
+            }
             item {
-                ZdFootnote("Find My devices are matched on the advertisement key, so a rotating address stays one entry. Your own tags show up too.")
+                ZdFootnote("Find My devices are matched on the advertisement key, so a rotating address stays one entry. A tag still with its owner stays on the list and does not alert. Background watch keeps listening with the screen off.")
             }
         }
     }
@@ -177,7 +203,13 @@ private fun TrackerRow(tracker: DetectedTracker, onClick: () -> Unit) {
     ZdListRow(
         onClick = onClick,
         title = tracker.displayName,
-        subtitle = "${BleDistanceEstimator.rangeLabel(tracker.rssi)} · ${tracker.places} places · seen ${tracker.seenCount}×",
+        subtitle = buildString {
+            append(BleDistanceEstimator.rangeLabel(tracker.rssi))
+            append(" · ${tracker.places} places · seen ${tracker.seenCount}×")
+            if (tracker.owner == OwnerState.WITH_OWNER) {
+                append(" · with its owner")
+            }
+        },
         leading = { ZdSignal(tracker.rssi) },
         trailing = { ZdSeverityBadge(tracker.risk.severity(), label = if (tracker.risk == TrackingRisk.NONE) "SEEN" else tracker.risk.label) }
     )

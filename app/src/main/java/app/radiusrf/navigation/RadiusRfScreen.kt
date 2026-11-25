@@ -35,6 +35,7 @@ sealed class RadiusRfScreen(
     data object Wardriving : RadiusRfScreen("wardriving", "Wardriving")
     data object WardrivingPlus : RadiusRfScreen("wardriving_plus", "Wardriving +")
     data object WardrivingPlusPlus : RadiusRfScreen("wardriving_plus_plus", "Wardriving ++")
+    data object RunCompare : RadiusRfScreen("run_compare", "Run Compare")
     data object WifiAware : RadiusRfScreen("wifi_aware", "Wi-Fi Aware")
     data object CellTower : RadiusRfScreen("cell_tower", "Cell Tower")
     data object UsbCamera : RadiusRfScreen("usb_camera", "USB Camera")
@@ -46,6 +47,7 @@ sealed class RadiusRfScreen(
     data object BluetoothTracker : RadiusRfScreen("bluetooth_tracker", "Tracker Scanner")
     data object RogueAp : RadiusRfScreen("rogue_ap", "Rogue AP Detector")
     data object NetworkScanner : RadiusRfScreen("network_scanner", "Network Scanner")
+    data object ConnectionLog : RadiusRfScreen("connection_log", "Connection Log")
     data object RfBugSweeper : RadiusRfScreen("rf_bug_sweeper", "RF Bug Sweeper")
     data object ProximityRadar : RadiusRfScreen("proximity_radar", "Proximity Radar")
     data object PrivacyScore : RadiusRfScreen("privacy_score", "Privacy Score")
@@ -64,9 +66,9 @@ sealed class RadiusRfScreen(
             listOf(
                 Dashboard, Tools, AlertCenter, Sessions, Sweep, Search, Settings,
                 Sensors, Wifi, Ble, Nfc, Ir, Uwb,
-                Usb, Sdr, FoxHunt, FieldMap, Camera, Ultrasonic, Wardriving, WardrivingPlus, WardrivingPlusPlus, WifiAware,
+                Usb, Sdr, FoxHunt, FieldMap, Camera, Ultrasonic, Wardriving, WardrivingPlus, WardrivingPlusPlus, RunCompare, WifiAware,
                 CellTower, UsbCamera, Gps, BluetoothClassic, WifiDirect, HiddenCamera,
-                GpsSpoofDetector, BluetoothTracker, RogueAp, NetworkScanner, RfBugSweeper, ProximityRadar,
+                GpsSpoofDetector, BluetoothTracker, RogueAp, NetworkScanner, ConnectionLog, RfBugSweeper, ProximityRadar,
                 PrivacyScore, DeauthDetector, EmfMapper, SignalLogger,
                 SignatureWatch, Ftm, IsmDecoder, TrafficRadio, Meshtastic
             )

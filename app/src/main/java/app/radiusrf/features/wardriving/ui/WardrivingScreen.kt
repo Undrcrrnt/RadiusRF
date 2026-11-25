@@ -108,14 +108,14 @@ private fun WardrivingContent(mode: SurveyMode, viewModel: WardrivingViewModel) 
             runningDetail = "${mode.radiosLabel} · ${nic.label}",
             idleDetail = when {
                 state.otherSurvey != null -> "${state.otherSurvey} is logging · start replaces it"
-                state.records.isEmpty() -> "Walk, cycle or drive a route"
+                state.live.isEmpty -> "Walk, cycle or drive a route"
                 else -> "Session kept · ready to export"
             },
             showBackground = false
         )
         WifiNicPicker(source = nic, onSelect = viewModel::selectSource)
 
-        if (state.records.isEmpty() && !state.isScanning && !state.isPaused) {
+        if (state.live.isEmpty && !state.isScanning && !state.isPaused) {
             ZdStatePanel(
                 kicker = if (state.error != null) "Couldn’t start" else "Ready",
                 kickerColor = if (state.error != null) ZdColors.Critical else ZdColors.Text3,
@@ -139,10 +139,11 @@ private fun WardrivingContent(mode: SurveyMode, viewModel: WardrivingViewModel) 
         ) {
             if (stats != null) {
                 item {
-                    val wifi = state.records.filter { it.isWifi }.map { it.bssid }.distinct().size
-                    val bluetooth = state.records.filter { it.isBluetooth }.map { it.bssid }.distinct().size
-                    val cells = state.records.filter { it.isCell }.map { it.bssid }.distinct().size
-                    val clients = state.records.filter { it.isClient }.map { it.bssid }.distinct().size
+                    val live = state.live
+                    val wifi = live.wifiNetworks
+                    val bluetooth = live.bluetoothDevices
+                    val cells = live.cells
+                    val clients = live.clientDevices
                     ZdCard {
                         Row {
                             when (mode) {
@@ -174,7 +175,7 @@ private fun WardrivingContent(mode: SurveyMode, viewModel: WardrivingViewModel) 
             }
             state.error?.let { item { ZdFootnote(it, icon = ZdIcons.Warning) } }
             state.exportStatus?.let { item { ZdFootnote(it, icon = ZdIcons.Check) } }
-            if (!state.isScanning && state.session != null && state.records.isNotEmpty()) {
+            if (!state.isScanning && state.session != null && !state.live.isEmpty) {
                 item { ZdSectionLabel("Export") }
                 item {
                     ZdSwitchRow(
@@ -198,19 +199,15 @@ private fun WardrivingContent(mode: SurveyMode, viewModel: WardrivingViewModel) 
                     ZdFootnote("WiGLE, Kismet, and airodump-ng files open in Netseer. PCAPNG opens in Wireshark and Netseer. The PCAPNG is rebuilt from the log, not a raw capture.")
                 }
             }
-            if (state.records.any { it.isClient }) {
-                val clients = state.records.filter { it.isClient }
-                    .groupBy { it.bssid.lowercase() to it.associatedBssid.orEmpty().lowercase() }
-                    .values
-                    .map { it.maxBy(WardrivingRecord::timestamp) }
-                    .sortedByDescending { it.rssi }
-                item { ZdSectionLabel("Clients", trailingText = "${clients.size}") }
-                item { ZdListCard(clients) { RecordRow(it) } }
+            val live = state.live
+            if (live.clients.isNotEmpty()) {
+                item { ZdSectionLabel("Clients", trailingText = "${live.clientDevices}") }
+                item { ZdListCard(live.clients) { RecordRow(it) } }
             }
-            val networks = state.records.filter { !it.isClient }
-            if (networks.isNotEmpty()) {
-                item { ZdSectionLabel("Latest", trailingText = "${networks.size}") }
-                item { ZdListCard(networks.takeLast(50).reversed()) { RecordRow(it) } }
+            if (live.networks.isNotEmpty()) {
+                val heard = live.wifiNetworks + live.bluetoothDevices + live.cells
+                item { ZdSectionLabel("Latest", trailingText = "$heard") }
+                item { ZdListCard(live.networks) { RecordRow(it) } }
             }
             item { ZdFootnote("Runs as a foreground service with a notification, so it keeps logging with the screen off.") }
         }

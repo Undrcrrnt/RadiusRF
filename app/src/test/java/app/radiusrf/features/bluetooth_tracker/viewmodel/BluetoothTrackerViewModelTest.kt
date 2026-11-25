@@ -9,8 +9,10 @@ import app.radiusrf.core.debug.DemoDataBus
 import app.radiusrf.core.testing.MainDispatcherRule
 import app.radiusrf.features.ble.domain.BleDevice
 import app.radiusrf.features.ble.domain.BleScanner
+import app.radiusrf.features.bluetooth_tracker.domain.TrackerTrailStore
 import app.radiusrf.features.bluetooth_tracker.domain.TrackerType
 import app.radiusrf.features.bluetooth_tracker.domain.TrackingRisk
+import app.radiusrf.features.watch.data.WatchRuleStore
 import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
@@ -37,7 +39,7 @@ class BluetoothTrackerViewModelTest {
         null,
         "7D:1E:AA:40:9C:02",
         -60,
-        manufacturerData = mapOf(0x004C to byteArrayOf(0x12, 0x08, 0, 1, 2, 3, 4, 5, 6, 7))
+        manufacturerData = mapOf(0x004C to byteArrayOf(0x12, 0x08, 0x04, 1, 2, 3, 4, 5, 6, 7))
     )
     private val tile = BleDevice("Tile Pro", "E4:B0:21:77:0A:1F", -80, listOf("0000feed-0000-1000-8000-00805f9b34fb"))
     private val buds = BleDevice("Galaxy Buds", "5C:F3:70:A1:02:9B", -48)
@@ -47,7 +49,9 @@ class BluetoothTrackerViewModelTest {
         scanner,
         alerts,
         mockk<app.radiusrf.core.sessions.SessionRepository>(relaxed = true),
-        DemoDataBus()
+        DemoDataBus(),
+        mockk<TrackerTrailStore>(relaxed = true),
+        mockk<WatchRuleStore>(relaxed = true)
     )
 
     @Test

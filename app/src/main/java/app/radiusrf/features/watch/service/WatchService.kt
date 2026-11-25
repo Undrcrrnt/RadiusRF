@@ -24,7 +24,9 @@ import app.radiusrf.core.notify.ZdNotifier
 import app.radiusrf.core.prefs.AppSettings
 import app.radiusrf.features.ble.domain.BleDevice
 import app.radiusrf.features.ble.domain.BleScanner
+import app.radiusrf.features.bluetooth_tracker.domain.OwnerState
 import app.radiusrf.features.bluetooth_tracker.domain.TrackerIdentifier
+import app.radiusrf.features.bluetooth_tracker.domain.TrackerTrailStore
 import app.radiusrf.features.bluetooth_tracker.domain.TrackerType
 import app.radiusrf.features.rogue_ap_detector.domain.RiskLevel
 import app.radiusrf.features.rogue_ap_detector.domain.RogueApAnalyzer
@@ -77,6 +79,7 @@ class WatchService : Service() {
     @Inject lateinit var alerts: AlertCenterRepository
     @Inject lateinit var settings: AppSettings
     @Inject lateinit var notifier: ZdNotifier
+    @Inject lateinit var trails: TrackerTrailStore
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var loop: Job? = null
@@ -149,11 +152,14 @@ class WatchService : Service() {
     }
 
     private suspend fun followMe(now: Long, devices: List<BleDevice>) {
+        val here = lastLocation()
         val trackers = devices.mapNotNull { d ->
-            val type = trackerIdentifier.match(d)?.type ?: return@mapNotNull null
-            Heard(d.address, type.label, d.rssi)
+            val match = trackerIdentifier.match(d) ?: return@mapNotNull null
+            if (match.owner == OwnerState.WITH_OWNER) return@mapNotNull null
+            if (here != null) trails.note(match.identity, match.type.label, match.owner, here.lat, here.lon, now)
+            Heard(match.identity, match.type.label, d.rssi)
         }
-        followMe.update(now, trackers, lastLocation()).forEach { hit ->
+        followMe.update(now, trackers, here).forEach { hit ->
             val where = hit.movedMetres?.let { " while you moved ${if (it >= 1000) "%.1f km".format(it / 1000) else "${it.toInt()} m"}" } ?: " across ${hit.sightings} checks"
             val detail = "A ${hit.heard.label} has been near you for ${formatMinutes(hit.durationMs)}$where."
             alerts.record(AlertSource.BLUETOOTH_TRACKER, AlertSeverity.HIGH, "Unknown ${hit.heard.label} moving with you", detail)

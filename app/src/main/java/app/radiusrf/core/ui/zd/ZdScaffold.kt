@@ -77,8 +77,10 @@ fun ZdHeader(
     title: String,
     modifier: Modifier = Modifier,
     onBack: (() -> Unit)? = null,
+    status: String? = null,
     actions: @Composable RowScope.() -> Unit = {}
 ) {
+    val mark = if (status != null) ZdColors.Medium else ZdColors.Accent
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -94,9 +96,9 @@ fun ZdHeader(
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clearAndSetSemantics { }) {
                 Text(
                     text = buildAnnotatedString {
-                        withStyle(SpanStyle(color = ZdColors.Accent)) { append("Radius:~") }
+                        withStyle(SpanStyle(color = mark)) { append("Radius:~") }
                         append(path)
-                        withStyle(SpanStyle(color = ZdColors.Accent)) { append(" $") }
+                        withStyle(SpanStyle(color = mark)) { append(" $") }
                     },
                     style = ZdType.Path,
                     color = ZdColors.Text3,
@@ -104,23 +106,26 @@ fun ZdHeader(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f, fill = false)
                 )
-                BlinkingCursor(Modifier.padding(start = 3.dp))
+                BlinkingCursor(Modifier.padding(start = 3.dp), color = mark)
             }
             Text(
                 text = title,
                 style = ZdType.Title,
-                color = ZdColors.Text,
+                color = if (status != null) mark else ZdColors.Text,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.semantics { heading() }
             )
+            if (status != null) {
+                Text(status, style = ZdType.Caption, color = mark, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
         }
         actions()
     }
 }
 
 @Composable
-private fun BlinkingCursor(modifier: Modifier = Modifier) {
+private fun BlinkingCursor(modifier: Modifier = Modifier, color: Color = ZdColors.Accent) {
     val transition = rememberInfiniteTransition(label = "cursor")
     val alpha by transition.animateFloat(
         initialValue = 1f,
@@ -142,7 +147,7 @@ private fun BlinkingCursor(modifier: Modifier = Modifier) {
             .width(6.dp)
             .height(11.dp)
             .alpha(alpha)
-            .background(ZdColors.Accent)
+            .background(color)
     )
 }
 

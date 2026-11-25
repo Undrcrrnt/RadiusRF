@@ -62,81 +62,13 @@ class RemoteIdWatch(context: Context) {
     }
 
     private fun parse(address: String, rssi: Int, data: ByteArray) {
-        if (data.size < 27 || data[0] != 0x0D.toByte()) return
-        var offset = 2
-        val firstType = data[offset].toInt() and 0x0F
-        if (firstType == 0xF && data.size >= offset + 3) {
-            val count = data[offset + 2].toInt() and 0xFF
-            offset += 3
-            repeat(count) {
-                if (offset + 25 > data.size) return@repeat
-                apply(address, rssi, data.copyOfRange(offset, offset + 25))
-                offset += 25
-            }
-        } else if (data.size >= offset + 25) {
-            apply(address, rssi, data.copyOfRange(offset, offset + 25))
-        }
-    }
-
-    private fun apply(address: String, rssi: Int, msg: ByteArray) {
-        val type = msg[0].toInt() and 0x0F
-        val previous = found[address]
-        val now = System.currentTimeMillis()
-        val next = when (type) {
-            0 -> {
-                val text = msg.copyOfRange(2, 22).toString(Charsets.US_ASCII)
-                    .filter { it.code in 32..126 }
-                    .trim()
-                (previous ?: blank(address, rssi, now)).copy(
-                    id = text.ifBlank { address },
-                    rssi = rssi,
-                    timeMs = now
-                )
-            }
-            1 -> {
-                val lat = leInt(msg, 5) / 10_000_000.0
-                val lon = leInt(msg, 9) / 10_000_000.0
-                val valid = lat in -90.0..90.0 && lon in -180.0..180.0 && !(lat == 0.0 && lon == 0.0)
-                (previous ?: blank(address, rssi, now)).copy(
-                    lat = if (valid) lat else previous?.lat,
-                    lon = if (valid) lon else previous?.lon,
-                    rssi = rssi,
-                    timeMs = now
-                )
-            }
-            4 -> {
-                val lat = leInt(msg, 2) / 10_000_000.0
-                val lon = leInt(msg, 6) / 10_000_000.0
-                val valid = lat in -90.0..90.0 && lon in -180.0..180.0 && !(lat == 0.0 && lon == 0.0)
-                val kind = when (msg[1].toInt() and 0x03) {
-                    0 -> "Takeoff"
-                    1 -> "Pilot"
-                    else -> "Fixed"
-                }
-                (previous ?: blank(address, rssi, now)).copy(
-                    operatorLat = if (valid) lat else previous?.operatorLat,
-                    operatorLon = if (valid) lon else previous?.operatorLon,
-                    operatorKind = if (valid) kind else previous?.operatorKind,
-                    rssi = rssi,
-                    timeMs = now
-                )
-            }
-            else -> (previous ?: blank(address, rssi, now)).copy(rssi = rssi, timeMs = now)
-        }
-        found[address] = next
+        val messages = OpenDroneId.messages(data)
+        if (messages.isEmpty()) return
+        messages.forEach { msg -> found[address] = OpenDroneId.fold(found[address], address, rssi, msg) }
+        RemoteIdLog.note(address, rssi, messages)
         while (found.size > 40) {
             val oldest = found.entries.minByOrNull { it.value.timeMs }?.key ?: break
             found.remove(oldest)
         }
-    }
-
-    private fun blank(address: String, rssi: Int, now: Long) =
-        RemoteIdSighting(address = address, id = address, lat = null, lon = null, rssi = rssi, timeMs = now)
-
-    private fun leInt(bytes: ByteArray, offset: Int): Int {
-        return (bytes[offset].toInt() and 0xFF) or
-            ((bytes[offset + 1].toInt() and 0xFF) shl 8) or
-            ((bytes[offset + 2].toInt() and 0xFF) shl 16) or
-            ((bytes[offset + 3].toInt() and 0xFF) shl 24)
     }
 }

@@ -6,7 +6,10 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.net.wifi.WifiManager
+import android.os.Build
 import android.os.SystemClock
+import app.radiusrf.features.sdr.domain.OpenDroneId
+import app.radiusrf.features.sdr.domain.RemoteIdLog
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -51,6 +54,11 @@ class WifiScanner(
                             if (oldest != null) links.remove(oldest)
                         }
                     }
+                }
+                val messages = OpenDroneId.fromBeacon(frame.bytes)
+                if (messages.isNotEmpty()) {
+                    val bssid = beaconBssid(frame.bytes)
+                    if (bssid != null) RemoteIdLog.note(bssid, frame.rssi ?: -100, messages)
                 }
                 val ap = BeaconFrame.parse(frame.bytes, frame.channel, frame.rssi) ?: return@collect
                 synchronized(seen) {
@@ -139,6 +147,7 @@ class WifiScanner(
             } else {
                 emptyList()
             }
+            noteWifiRemoteId(result)
             WifiAccessPoint(
                 ssid = result.SSID.ifBlank { "<Hidden>" },
                 bssid = result.BSSID,
@@ -150,5 +159,30 @@ class WifiScanner(
                 clients = clients
             )
         }.sortedByDescending { it.rssi }
+    }
+
+    @SuppressLint("NewApi")
+    private fun noteWifiRemoteId(result: android.net.wifi.ScanResult) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
+        val elements = result.informationElements
+        val messages = ArrayList<ByteArray>()
+        for (element in elements) {
+            if (element.id != 221) continue
+            val buffer = element.bytes.duplicate()
+            val bytes = ByteArray(buffer.remaining())
+            buffer.get(bytes)
+            messages += OpenDroneId.fromVendorIe(bytes)
+        }
+        if (messages.isNotEmpty()) RemoteIdLog.note(result.BSSID, result.level, messages)
+    }
+
+    private fun beaconBssid(raw: ByteArray): String? {
+        var offset = 0
+        if (raw.size >= 8 && raw[0] == 0.toByte() && raw[1] == 0.toByte()) {
+            val headerLen = (raw[2].toInt() and 0xFF) or ((raw[3].toInt() and 0xFF) shl 8)
+            if (headerLen in 8 until raw.size) offset = headerLen
+        }
+        if (raw.size - offset < 22) return null
+        return (0 until 6).joinToString(":") { i -> "%02x".format(raw[offset + 16 + i].toInt() and 0xFF) }
     }
 }

@@ -83,4 +83,13 @@ object ProximityCalculator {
         val rounded = ((maxDistance / 10f).toInt() + 1) * 10f
         return rounded.coerceIn(10f, 100f)
     }
+
+    const val MIN_ZOOM_RADIUS_M = 1f
+    const val MAX_ZOOM_RADIUS_M = 200f
+
+    /** [factor] above 1 zooms in. The result is the range, in meters, drawn across the radar. */
+    fun zoomRadius(radiusM: Float, factor: Float): Float {
+        val safe = if (factor > 0f) factor else 1f
+        return (radiusM / safe).coerceIn(MIN_ZOOM_RADIUS_M, MAX_ZOOM_RADIUS_M)
+    }
 }

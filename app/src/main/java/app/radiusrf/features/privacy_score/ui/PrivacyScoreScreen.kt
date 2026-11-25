@@ -36,6 +36,7 @@ import app.radiusrf.core.ui.zd.ZdStatePanel
 import app.radiusrf.core.util.formatAgo
 import app.radiusrf.features.privacy_score.domain.CheckCategory
 import app.radiusrf.features.privacy_score.domain.CheckStatus
+import app.radiusrf.features.privacy_score.domain.ExposureFact
 import app.radiusrf.features.privacy_score.domain.PrivacyCheck
 import app.radiusrf.features.privacy_score.domain.PrivacyScoreState
 import app.radiusrf.features.privacy_score.viewmodel.PrivacyScoreViewModel
@@ -97,7 +98,10 @@ private fun PrivacyScoreContent(viewModel: PrivacyScoreViewModel) {
                 title = "How exposed is this phone?",
                 body = state.error ?: "16+ checks across WiFi, Bluetooth, device, network and physical security, weighted by how much each one exposes you. Nothing leaves the phone.",
                 primaryAction = if (state.isScanning) null else "Check my phone" to viewModel::startScan,
-                primaryIcon = ZdIcons.Play
+                primaryIcon = ZdIcons.Play,
+                extra = if (state.exposure.isEmpty()) null else {
+                    { ExposureSection(state.exposure) }
+                }
             )
             return@Column
         }
@@ -108,6 +112,7 @@ private fun PrivacyScoreContent(viewModel: PrivacyScoreViewModel) {
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             item { ScoreCard(state) }
+            if (state.exposure.isNotEmpty()) item { ExposureSection(state.exposure) }
             item { ZdSectionLabel("By area") }
             item {
                 ZdCard(verticalSpacing = 10.dp) {
@@ -157,6 +162,16 @@ private fun PrivacyScoreContent(viewModel: PrivacyScoreViewModel) {
             }
             state.error?.let { item { ZdFootnote(it, icon = ZdIcons.Warning) } }
             item { ZdButton("Run again", onClick = viewModel::rescan, variant = ZdButtonVariant.Secondary, icon = ZdIcons.Refresh, enabled = !state.isScanning) }
+        }
+    }
+}
+
+@Composable
+private fun ExposureSection(facts: List<ExposureFact>) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        ZdSectionLabel("What any app can read", trailingText = "${facts.size}")
+        ZdListCard(facts) { fact ->
+            ZdListRow(title = fact.title, titleMono = false, subtitle = "${fact.value}. ${fact.why}")
         }
     }
 }

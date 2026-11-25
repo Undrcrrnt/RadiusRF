@@ -2,9 +2,13 @@ package app.radiusrf.core.database.entity
 
 import androidx.room.ColumnInfo
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
 
-@Entity(tableName = "wardriving_records")
+@Entity(
+    tableName = "wardriving_records",
+    indices = [Index(value = ["sessionId", "id"])]
+)
 data class WardrivingRecordEntity(
     @PrimaryKey(autoGenerate = true)
     val id: Long = 0,

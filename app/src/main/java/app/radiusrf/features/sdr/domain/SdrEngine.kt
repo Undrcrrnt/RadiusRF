@@ -299,7 +299,7 @@ class SdrEngine {
                     SdrDsp.spectrum(iq, n, bins, signedNow)
                     SdrLevel.update(selectedChannelLevel(bins, rateNow), frequencyHz, true)
                     _spectrum.value = bins.copyOf()
-                    rows.addLast(bins.copyOf())
+                    rows.addLast(displayRow(bins))
                     while (rows.size > 48) rows.removeFirst()
                     _waterfall.value = rows.toList()
                 }
@@ -317,6 +317,28 @@ class SdrEngine {
             running = false
             SdrLevel.update(SdrLevel.levelDb.value, frequencyHz, false)
         }
+    }
+
+    private fun displayRow(bins: FloatArray): FloatArray {
+        val width = 320
+        if (bins.size <= width) return bins.copyOf()
+        val out = FloatArray(width)
+        var x = 0
+        while (x < width) {
+            val start = x * bins.size / width
+            var end = (x + 1) * bins.size / width
+            if (end <= start) end = start + 1
+            if (end > bins.size) end = bins.size
+            var peak = -160f
+            var i = start
+            while (i < end) {
+                if (bins[i] > peak) peak = bins[i]
+                i++
+            }
+            out[x] = peak
+            x++
+        }
+        return out
     }
 
     private fun measureGnss(iq: ByteArray, bins: FloatArray) {

@@ -185,9 +185,18 @@ fun SearchScreen(
 private fun ToolRow(tool: ToolInfo, onClick: () -> Unit) {
     ZdListRow(
         title = tool.name,
-        subtitle = tool.job,
+        subtitle = if (tool.status == null) tool.job else null,
         titleMono = false,
-        leading = { ZdIconTile(tool.icon) },
+        supporting = tool.status?.let { status ->
+            { Text(status, style = ZdType.Caption, color = ZdColors.Medium, maxLines = 1) }
+        },
+        leading = {
+            ZdIconTile(
+                tool.icon,
+                tint = if (tool.status != null) ZdColors.Medium else ZdColors.Accent,
+                background = if (tool.status != null) ZdColors.MediumBg else ZdColors.AccentBg
+            )
+        },
         showChevron = true,
         onClick = onClick
     )

@@ -37,6 +37,13 @@ class ToolCatalogTest {
     }
 
     @Test
+    fun `sdr is the only tool marked beta`() {
+        val beta = tools.filter { it.status != null }
+        assertEquals(listOf("sdr"), beta.map { it.route })
+        assertEquals("Status: Beta Test", beta.single().status)
+    }
+
+    @Test
     fun `lookup by route finds tools and ignores unknown routes`() {
         assertEquals("WiFi Analyzer", ToolCatalog.forRoute("wifi")?.name)
         assertNull(ToolCatalog.forRoute("dashboard"))

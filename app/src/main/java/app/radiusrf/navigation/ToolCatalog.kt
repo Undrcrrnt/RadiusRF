@@ -62,7 +62,9 @@ data class ToolInfo(
     val path: String,
     val group: ToolGroup,
     val requirement: HardwareRequirement,
-    val icon: ImageVector
+    val icon: ImageVector,
+    /** Shown in place of the job line when this tool is not finished. */
+    val status: String? = null
 ) {
     val route: String get() = screen.route
 }
@@ -89,11 +91,12 @@ object ToolCatalog {
             ToolInfo(RadiusRfScreen.Ble, "BLE Scanner", "Devices, GATT explorer, JSON dumps", "/tools/ble", ToolGroup.SCAN, HardwareRequirement.BLE, ZdIcons.Bluetooth),
             ToolInfo(RadiusRfScreen.BluetoothClassic, "Bluetooth Classic", "Discovery, SDP services, SPP serial", "/tools/bt-classic", ToolGroup.SCAN, HardwareRequirement.BT, ZdIcons.Bluetooth),
             ToolInfo(RadiusRfScreen.NetworkScanner, "Network Scanner", "Hosts, ports, mDNS and SSDP on your LAN", "/tools/network", ToolGroup.SCAN, HardwareRequirement.LAN, ZdIcons.Lan),
+            ToolInfo(RadiusRfScreen.ConnectionLog, "Connection Log", "This phone's apps, hosts, and a PCAP", "/tools/connections", ToolGroup.SCAN, HardwareRequirement.NONE, ZdIcons.Lan),
             ToolInfo(RadiusRfScreen.ProximityRadar, "Proximity Radar", "Plot nearby devices by distance", "/tools/radar", ToolGroup.SCAN, HardwareRequirement.BLE, ZdIcons.Sweep),
             ToolInfo(RadiusRfScreen.Ftm, "FTM Ranging", "802.11mc distance to nearby access points", "/tools/ftm", ToolGroup.SCAN, HardwareRequirement.WIFI, ZdIcons.Sweep),
             ToolInfo(RadiusRfScreen.Meshtastic, "Meshtastic Listen", "Hear Meshtastic nodes without joining", "/tools/meshtastic", ToolGroup.SCAN, HardwareRequirement.BLE, ZdIcons.Radio),
             ToolInfo(RadiusRfScreen.WifiAware, "Wi-Fi Aware", "Router-less NAN peer discovery", "/tools/wifi-aware", ToolGroup.SCAN, HardwareRequirement.NAN, ZdIcons.Wifi),
-            ToolInfo(RadiusRfScreen.Sdr, "SDR Radio", "RTL-SDR and HackRF spectrum, waterfall, and audio", "/tools/sdr", ToolGroup.SCAN, HardwareRequirement.OTG, ZdIcons.Radio),
+            ToolInfo(RadiusRfScreen.Sdr, "SDR Radio", "Receive console: waterfall, audio, and decoders", "/tools/sdr", ToolGroup.SCAN, HardwareRequirement.OTG, ZdIcons.Radio, status = "Status: Beta Test"),
             ToolInfo(RadiusRfScreen.IsmDecoder, "ISM Decoder", "Name 315/433/868/915 MHz sensor bursts", "/tools/ism", ToolGroup.ANALYZE, HardwareRequirement.OTG, ZdIcons.Radio),
             ToolInfo(RadiusRfScreen.TrafficRadio, "ADS-B / AIS", "Decode nearby aircraft and ships", "/tools/traffic", ToolGroup.ANALYZE, HardwareRequirement.OTG, ZdIcons.Radio),
             ToolInfo(RadiusRfScreen.FoxHunt, "Fox Hunt", "Bearing from the strongest heading", "/tools/foxhunt", ToolGroup.ANALYZE, HardwareRequirement.MULTI, ZdIcons.Crosshair),
@@ -116,7 +119,8 @@ object ToolCatalog {
             ToolInfo(RadiusRfScreen.SignalLogger, "Signal Logger", "WiFi + BLE arrival/departure timeline", "/tools/signal-logger", ToolGroup.LOG, HardwareRequirement.MULTI, ZdIcons.Timeline),
             ToolInfo(RadiusRfScreen.Wardriving, "Wardriving", "GPS + Wi-Fi log, export for Netseer and Wireshark", "/tools/wardriving", ToolGroup.LOG, HardwareRequirement.GPS, ZdIcons.Map),
             ToolInfo(RadiusRfScreen.WardrivingPlus, "Wardriving +", "GPS + Wi-Fi + Bluetooth log and export", "/tools/wardriving-plus", ToolGroup.LOG, HardwareRequirement.GPS, ZdIcons.Map),
-            ToolInfo(RadiusRfScreen.WardrivingPlusPlus, "Wardriving ++", "GPS + Wi-Fi + Bluetooth + cellular log and export", "/tools/wardriving-plus-plus", ToolGroup.LOG, HardwareRequirement.GPS, ZdIcons.Map)
+            ToolInfo(RadiusRfScreen.WardrivingPlusPlus, "Wardriving ++", "GPS + Wi-Fi + Bluetooth + cellular log and export", "/tools/wardriving-plus-plus", ToolGroup.LOG, HardwareRequirement.GPS, ZdIcons.Map),
+            ToolInfo(RadiusRfScreen.RunCompare, "Run Compare", "Find devices that stayed with you across saved runs", "/tools/run-compare", ToolGroup.LOG, HardwareRequirement.NONE, ZdIcons.Layers)
         )
     }
 
@@ -145,6 +149,6 @@ fun filterTools(
     return tools.filter { tool ->
         (group == null || tool.group == group) &&
             (!onlySupported || isAvailable(tool)) &&
-            (q.isEmpty() || "${tool.name} ${tool.job} ${tool.requirement.tag}".lowercase().contains(q))
+            (q.isEmpty() || "${tool.name} ${tool.job} ${tool.status.orEmpty()} ${tool.requirement.tag}".lowercase().contains(q))
     }
 }

@@ -29,8 +29,11 @@ import com.google.android.gms.location.LocationRequest
 import com.google.android.gms.location.LocationResult
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
@@ -39,6 +42,7 @@ import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicReference
 
 class WardrivingCollector(
     private val context: Context,
@@ -46,7 +50,8 @@ class WardrivingCollector(
     private val bluetoothManager: BluetoothManager?,
     private val cellTowerAnalyzer: CellTowerAnalyzer,
     private val nic: WifiNicPreference,
-    private val usb: UsbWifiSession
+    private val usb: UsbWifiSession,
+    private val sessionState: WardrivingSessionState
 ) {
     @SuppressLint("MissingPermission")
     fun collect(mode: SurveyMode): Flow<List<WardrivingRecord>> = callbackFlow {
@@ -177,12 +182,103 @@ class WardrivingCollector(
         val locationRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 3000L)
             .setMinUpdateIntervalMillis(1000)
             .build()
+        val lastLocation = AtomicReference<Location?>(null)
+        val snapshotLock = Any()
+        val board = sessionState.board
+
+        fun observeNow(location: Location, now: Long): List<WardrivingRecord> {
+            val records = ArrayList<WardrivingRecord>()
+            if (mode.wifi && externalWifi()) {
+                usbAps.values.forEach { ap ->
+                    records += sighting(
+                        id = ap.bssid,
+                        name = ap.ssid.takeIf { it.isNotBlank() && it != "<Hidden>" },
+                        rssi = ap.rssi,
+                        frequency = ap.frequency,
+                        details = ap.capabilities,
+                        radio = SurveyRadio.WIFI,
+                        location = location,
+                        timestamp = ap.heardAt
+                    )
+                }
+                usbClients.values.forEach { clientHeard ->
+                    val ap = usbAps[clientHeard.ap]
+                    records += sighting(
+                        id = clientHeard.mac,
+                        name = ap?.ssid?.takeIf { it.isNotBlank() && it != "<Hidden>" },
+                        rssi = clientHeard.rssi,
+                        frequency = ap?.frequency ?: 0,
+                        details = clientHeard.ap,
+                        radio = SurveyRadio.CLIENT,
+                        location = location,
+                        timestamp = clientHeard.heardAt
+                    )
+                }
+            } else if (mode.wifi) {
+                records += wifiManager.scanResults.map { ap ->
+                    sighting(
+                        id = ap.BSSID,
+                        name = ap.SSID.takeIf { it.isNotBlank() },
+                        rssi = ap.level,
+                        frequency = ap.frequency,
+                        details = ap.capabilities,
+                        radio = SurveyRadio.WIFI,
+                        location = location,
+                        timestamp = now
+                    )
+                }
+            }
+            if (mode.bluetooth) {
+                ble.forEach { (address, snap) ->
+                    records += sighting(address, snap.name, snap.rssi, 0, "Misc", SurveyRadio.BLE, location, now)
+                }
+                classic.forEach { (address, snap) ->
+                    records += sighting(address, snap.name, snap.rssi, 0, snap.kind, SurveyRadio.BT, location, now)
+                }
+            }
+            if (mode.cellular && granted(android.Manifest.permission.READ_PHONE_STATE)) {
+                cellTowerAnalyzer.snapshot().forEach { cell ->
+                    val radio = cell.type.name
+                    records += sighting(
+                        id = cellIdentity(cell.mcc, cell.mnc, cell.lac, cell.cid),
+                        name = cell.carrierName,
+                        rssi = cell.rssi,
+                        frequency = cell.arfcn ?: 0,
+                        details = "$radio;${plmn(cell.mcc, cell.mnc)}",
+                        radio = radio,
+                        location = location,
+                        timestamp = now
+                    )
+                }
+            }
+            return records
+        }
+
+        // The screen reads this. The database is not involved.
+        scope.launch(Dispatchers.Default) {
+            while (isActive) {
+                val location = lastLocation.get()
+                val start = sessionState.active.value?.startTime
+                if (location != null && start != null) {
+                    try {
+                        observeNow(location, System.currentTimeMillis()).forEach { board.note(it) }
+                        sessionState.publishLive(start)
+                    } catch (_: SecurityException) {
+                    }
+                }
+                delay(500)
+            }
+        }
+
         val callback = object : LocationCallback() {
             override fun onLocationResult(result: LocationResult) {
                 val location = result.lastLocation ?: return
-                try {
-                snapshot(location)
-                } catch (_: SecurityException) {
+                lastLocation.set(location)
+                scope.launch(Dispatchers.Default) {
+                    try {
+                        synchronized(snapshotLock) { snapshot(location) }
+                    } catch (_: SecurityException) {
+                    }
                 }
             }
 
@@ -267,7 +363,11 @@ class WardrivingCollector(
                 lastSnapshotElapsedMs = nowElapsedMs
                 ble.entries.removeAll { nowElapsedMs - it.value.seenElapsedMs > OBSERVATION_MAX_AGE_MS }
                 classic.entries.removeAll { nowElapsedMs - it.value.seenElapsedMs > OBSERVATION_MAX_AGE_MS }
-                if (records.isNotEmpty()) trySend(records)
+                if (records.isNotEmpty() && trySend(records).isSuccess) {
+                    board.addWritten(records.size)
+                    val start = sessionState.active.value?.startTime
+                    if (start != null) sessionState.publishLive(start)
+                }
             }
         }
         client.requestLocationUpdates(locationRequest, callback, Looper.getMainLooper())

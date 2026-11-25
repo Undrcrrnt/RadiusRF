@@ -75,6 +75,14 @@ class ProximityCalculatorTest {
     }
 
     @Test
+    fun `zoom in shortens the range and zoom out lengthens it`() {
+        assertEquals(15f, ProximityCalculator.zoomRadius(30f, 2f), 0.01f)
+        assertEquals(60f, ProximityCalculator.zoomRadius(30f, 0.5f), 0.01f)
+        assertEquals(ProximityCalculator.MIN_ZOOM_RADIUS_M, ProximityCalculator.zoomRadius(1f, 4f), 0.01f)
+        assertEquals(ProximityCalculator.MAX_ZOOM_RADIUS_M, ProximityCalculator.zoomRadius(200f, 0.25f), 0.01f)
+    }
+
+    @Test
     fun `auto scan radius is clamped between 10 and 100`() {
         assertEquals(10f, ProximityCalculator.autoScanRadius(listOf(radarDevice(distance = 0.5f))), 0.0f)
         assertEquals(100f, ProximityCalculator.autoScanRadius(listOf(radarDevice(distance = 500f))), 0.0f)

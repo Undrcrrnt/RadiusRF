@@ -12,10 +12,15 @@ import app.radiusrf.core.alerts.AlertSeverity
 import app.radiusrf.core.alerts.AlertSource
 import app.radiusrf.features.ble.domain.BleScanner
 import app.radiusrf.features.bluetooth_tracker.domain.DetectedTracker
+import app.radiusrf.features.bluetooth_tracker.domain.OwnerState
 import app.radiusrf.features.bluetooth_tracker.domain.TrackerIdentifier
 import app.radiusrf.features.bluetooth_tracker.domain.TrackerScanState
+import app.radiusrf.features.bluetooth_tracker.domain.TrackerTrailStore
 import app.radiusrf.features.bluetooth_tracker.domain.TrackerType
 import app.radiusrf.features.bluetooth_tracker.domain.TrackingRisk
+import app.radiusrf.features.watch.data.WatchRuleStore
+import app.radiusrf.features.watch.domain.RuleKind
+import app.radiusrf.features.watch.service.WatchService
 import app.radiusrf.core.sessions.ItemKind
 import app.radiusrf.core.sessions.SessionItem
 import app.radiusrf.core.sessions.SessionRepository
@@ -45,7 +50,9 @@ class BluetoothTrackerViewModel @Inject constructor(
     private val bleScanner: BleScanner,
     private val alertCenterRepository: AlertCenterRepository,
     private val sessions: SessionRepository,
-    private val demoBus: DemoDataBus
+    private val demoBus: DemoDataBus,
+    private val trails: TrackerTrailStore,
+    private val watchRules: WatchRuleStore
 ) : ViewModel() {
 
     /** When the current run started; null when no run is in progress. */
@@ -78,7 +85,11 @@ class BluetoothTrackerViewModel @Inject constructor(
             places.clear()
             totalDevicesScanned = 0
             scanStartTime = System.currentTimeMillis()
-            _state.value = TrackerScanState(isScanning = true)
+            _state.value = TrackerScanState(
+                isScanning = true,
+                backgroundWatching = backgroundWatching(),
+                savedPlaces = trails.all()
+            )
             runStartedAt = System.currentTimeMillis()
         } else {
             _state.value = _state.value.copy(isScanning = true, isPaused = false, error = null)
@@ -108,7 +119,7 @@ class BluetoothTrackerViewModel @Inject constructor(
                     for (device in devices) {
                         val now = device.lastSeen
                         val match = identifier.match(device) ?: continue
-                        notePlace(match.identity)
+                        notePlace(match.identity, match.type.label, match.owner)
                         val placeCount = places[match.identity]?.size ?: 0
                         val existing = trackerMap[match.identity]
                         val updated = if (existing != null) {
@@ -119,7 +130,8 @@ class BluetoothTrackerViewModel @Inject constructor(
                                 lastSeen = now,
                                 seenCount = existing.seenCount + if (bump) 1 else 0,
                                 name = device.name ?: existing.name,
-                                places = placeCount
+                                places = placeCount,
+                                owner = match.owner
                             )
                         } else {
                             DetectedTracker(
@@ -132,7 +144,8 @@ class BluetoothTrackerViewModel @Inject constructor(
                                 seenCount = 1,
                                 risk = TrackingRisk.LOW,
                                 identity = match.identity,
-                                places = placeCount
+                                places = placeCount,
+                                owner = match.owner
                             )
                         }
                         trackerMap[match.identity] = updated.copy(risk = identifier.assessRisk(updated))
@@ -156,7 +169,9 @@ class BluetoothTrackerViewModel @Inject constructor(
                         trackers = sortedTrackers,
                         totalDevicesScanned = totalDevicesScanned,
                         highRiskCount = highRisk,
-                        scanDurationMs = System.currentTimeMillis() - scanStartTime
+                        scanDurationMs = System.currentTimeMillis() - scanStartTime,
+                        backgroundWatching = backgroundWatching(),
+                        savedPlaces = trails.all()
                     )
                 }
         }
@@ -192,7 +207,10 @@ class BluetoothTrackerViewModel @Inject constructor(
         totalDevicesScanned = 0
         scanStartTime = 0L
         reportedRiskTiers.clear()
-        _state.value = TrackerScanState()
+        _state.value = TrackerScanState(
+            backgroundWatching = backgroundWatching(),
+            savedPlaces = trails.all()
+        )
     }
 
     private fun reportRiskEscalations(trackers: List<DetectedTracker>) {
@@ -222,12 +240,23 @@ class BluetoothTrackerViewModel @Inject constructor(
         }
     }
 
-    private fun notePlace(identity: String) {
+    fun watchInBackground() {
+        watchRules.setPaused(false)
+        watchRules.setEnabled(RuleKind.FOLLOW_ME.name, true)
+        WatchService.sync(context, watchRules)
+        _state.value = _state.value.copy(backgroundWatching = true, savedPlaces = trails.all())
+    }
+
+    fun backgroundWatching(): Boolean =
+        watchRules.active.any { it.kind == RuleKind.FOLLOW_ME }
+
+    private fun notePlace(identity: String, label: String, owner: OwnerState) {
         val here = lastLocation() ?: return
         val list = places.getOrPut(identity) { mutableListOf() }
         if (list.none { meters(it.first, it.second, here.first, here.second) < 250.0 }) {
             list.add(here)
         }
+        trails.note(identity, label, owner, here.first, here.second, System.currentTimeMillis())
     }
 
     private fun lastLocation(): Pair<Double, Double>? = runCatching {
@@ -289,6 +318,10 @@ class BluetoothTrackerViewModel @Inject constructor(
 
     init {
         observeDemoRequests(demoBus, DemoData.Routes.BLUETOOTH_TRACKER) { loadDemoData() }
+        _state.value = _state.value.copy(
+            backgroundWatching = runCatching { backgroundWatching() }.getOrDefault(false),
+            savedPlaces = runCatching { trails.all() }.getOrDefault(emptyList())
+        )
     }
 
     /** Debug-only: replaces live state with [DemoData] so the populated UI can be verified without hardware. */

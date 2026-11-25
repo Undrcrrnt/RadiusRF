@@ -139,6 +139,19 @@ class ZdNotifier @Inject constructor(
         notify(SWEEP_ID, n)
     }
 
+    /** Shown while the connection log's local VPN is forwarding this phone's IPv4. */
+    fun connectionLog(text: String, stop: PendingIntent): Notification =
+        NotificationCompat.Builder(context, CHANNEL_WATCHING)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle("Connection log")
+            .setContentText(text)
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setContentIntent(openRoute("connection_log"))
+            .addAction(0, "Stop", stop)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .build()
+
     /** The ongoing notification a foreground watch service must show. */
     fun watching(summary: String, pause: PendingIntent): Notification =
         NotificationCompat.Builder(context, CHANNEL_WATCHING)

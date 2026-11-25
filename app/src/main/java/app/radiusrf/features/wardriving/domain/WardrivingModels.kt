@@ -50,6 +50,7 @@ data class WardrivingStats(
 data class WardrivingState(
     val session: WardrivingSession? = null,
     val records: List<WardrivingRecord> = emptyList(),
+    val live: SurveyLive = SurveyLive(),
     val isScanning: Boolean = false,
     val isPaused: Boolean = false,
     val exportStatus: String? = null,

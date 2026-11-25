@@ -29,5 +29,5 @@ fun SdrScreen(
         return
     }
 
-    SdrWorkbench(state, viewModel, Modifier.fillMaxSize())
+    ReceiveConsole(viewModel, Modifier.fillMaxSize())
 }

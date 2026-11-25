@@ -24,7 +24,24 @@ class TrackerIdentifierTest {
     @Test
     fun `identifies Find My by manufacturer payload`() {
         val payload = byteArrayOf(0x12, 0x08, 0x00, 1, 2, 3, 4, 5, 6, 7)
-        assertEquals(TrackerType.FIND_MY, identifier.match(ble(manufacturerData = mapOf(0x004C to payload)))?.type)
+        val match = identifier.match(ble(manufacturerData = mapOf(0x004C to payload)))
+        assertEquals(TrackerType.FIND_MY, match?.type)
+        assertEquals(OwnerState.WITH_OWNER, match?.owner)
+    }
+
+    @Test
+    fun `a separated Find My tag is eligible to alert`() {
+        val payload = byteArrayOf(0x12, 0x08, 0x04, 1, 2, 3, 4, 5, 6, 7)
+        val match = identifier.match(ble(manufacturerData = mapOf(0x004C to payload)))
+        assertEquals(OwnerState.SEPARATED, match?.owner)
+        assertEquals(
+            TrackingRisk.HIGH,
+            identifier.assessRisk(tracker(TrackerType.FIND_MY, 3, places = 3).copy(owner = OwnerState.SEPARATED))
+        )
+        assertEquals(
+            TrackingRisk.LOW,
+            identifier.assessRisk(tracker(TrackerType.FIND_MY, 3, places = 3).copy(owner = OwnerState.WITH_OWNER))
+        )
     }
 
     @Test

@@ -233,23 +233,36 @@ private fun ToolListRow(row: ToolRow, selected: Boolean, onClick: () -> Unit, on
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
+        val beta = tool.status != null && row.available
         ZdIconTile(
             tool.icon,
-            tint = if (row.available) ZdColors.Accent else ZdColors.Text3,
-            background = if (row.available) ZdColors.AccentBg else ZdColors.Surface2,
+            tint = when {
+                !row.available -> ZdColors.Text3
+                beta -> ZdColors.Medium
+                else -> ZdColors.Accent
+            },
+            background = when {
+                !row.available -> ZdColors.Surface2
+                beta -> ZdColors.MediumBg
+                else -> ZdColors.AccentBg
+            },
             size = 38.dp
         )
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text(tool.name, style = ZdType.Label, color = ZdColors.Text)
+                Text(tool.name, style = ZdType.Label, color = if (beta) ZdColors.Medium else ZdColors.Text)
                 if (row.pinned) {
-                    Icon(ZdIcons.Pin, contentDescription = "Pinned", tint = ZdColors.Accent, modifier = Modifier.size(12.dp))
+                    Icon(ZdIcons.Pin, contentDescription = "Pinned", tint = if (beta) ZdColors.Medium else ZdColors.Accent, modifier = Modifier.size(12.dp))
                 }
             }
             Text(
-                if (row.available) tool.job else "Not available on this phone",
+                when {
+                    !row.available -> "Not available on this phone"
+                    tool.status != null -> tool.status
+                    else -> tool.job
+                },
                 style = ZdType.Caption,
-                color = ZdColors.Text3
+                color = if (beta) ZdColors.Medium else ZdColors.Text3
             )
         }
         ZdHardwareTag(tool.requirement.tag, available = row.available)

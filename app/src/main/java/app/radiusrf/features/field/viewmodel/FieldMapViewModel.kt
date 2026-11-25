@@ -10,6 +10,7 @@ import androidx.lifecycle.viewModelScope
 import app.radiusrf.features.maps.SurveillanceSite
 import app.radiusrf.features.maps.SurveillanceStore
 import app.radiusrf.features.sdr.domain.RemoteIdSighting
+import app.radiusrf.features.sdr.domain.RemoteIdLog
 import app.radiusrf.features.sdr.domain.RemoteIdWatch
 import app.radiusrf.features.wardriving.data.WardrivingRepository
 import app.radiusrf.features.wardriving.domain.WardrivingRecord
@@ -87,6 +88,9 @@ class FieldMapViewModel @Inject constructor(
         viewModelScope.launch {
             FieldBearing.label.collect { text -> _state.update { it.copy(bearingLabel = text) } }
         }
+        viewModelScope.launch {
+            RemoteIdLog.sightings.collect { list -> _state.update { it.copy(remoteIds = list) } }
+        }
     }
 
     @SuppressLint("MissingPermission")
@@ -99,7 +103,7 @@ class FieldMapViewModel @Inject constructor(
                 ?: locationManager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
             if (last != null) _state.update { it.copy(lat = last.latitude, lon = last.longitude) }
         }
-        val error = remoteId.start { sightings -> _state.update { it.copy(remoteIds = sightings, remoteNote = null) } }
+        val error = remoteId.start { }
         if (error != null) _state.update { it.copy(remoteNote = error) }
     }
 

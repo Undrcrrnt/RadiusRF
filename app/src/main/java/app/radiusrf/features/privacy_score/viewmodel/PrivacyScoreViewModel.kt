@@ -10,6 +10,7 @@ import androidx.lifecycle.viewModelScope
 import app.radiusrf.features.ble.domain.BleDevice
 import app.radiusrf.features.ble.domain.BleScanner
 import app.radiusrf.features.privacy_score.domain.CheckStatus
+import app.radiusrf.features.privacy_score.domain.DeviceExposure
 import app.radiusrf.features.privacy_score.domain.PrivacyCheck
 import app.radiusrf.features.privacy_score.domain.PrivacyScoreCalculator
 import app.radiusrf.features.privacy_score.domain.PrivacyScoreState
@@ -25,7 +26,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import javax.inject.Inject
 import kotlinx.coroutines.CancellationException
@@ -44,6 +47,13 @@ class PrivacyScoreViewModel @Inject constructor(
 
     private var scanJob: Job? = null
 
+    init {
+        viewModelScope.launch {
+            val exposure = withContext(Dispatchers.IO) { DeviceExposure.facts(context) }
+            _state.value = _state.value.copy(exposure = exposure)
+        }
+    }
+
     private val wifiManager: WifiManager =
         context.getSystemService(Context.WIFI_SERVICE) as WifiManager
 
@@ -53,7 +63,7 @@ class PrivacyScoreViewModel @Inject constructor(
         if (keep) {
             _state.value = _state.value.copy(isScanning = true, isPaused = false, error = null)
         } else {
-            _state.value = PrivacyScoreState(isScanning = true)
+            _state.value = PrivacyScoreState(isScanning = true, exposure = _state.value.exposure)
         }
 
         scanJob = viewModelScope.launch {
@@ -128,6 +138,9 @@ class PrivacyScoreViewModel @Inject constructor(
                 sensorDataCollector.stop(sensorOwner)
 
                 // ── Finalize ────────────────────────────────────────────
+                val exposure = _state.value.exposure.ifEmpty {
+                    withContext(Dispatchers.IO) { DeviceExposure.facts(context) }
+                }
                 val score = PrivacyScoreCalculator.calculateScore(allChecks)
                 val grade = PrivacyScoreCalculator.scoreToGrade(score)
                 val categoryScores = PrivacyScoreCalculator.calculateCategoryScores(allChecks)
@@ -141,7 +154,8 @@ class PrivacyScoreViewModel @Inject constructor(
                     warnCount = allChecks.count { it.status == CheckStatus.WARNING },
                     failCount = allChecks.count { it.status == CheckStatus.FAIL },
                     categoryScores = categoryScores,
-                    lastScanTime = System.currentTimeMillis()
+                    lastScanTime = System.currentTimeMillis(),
+                    exposure = exposure
                 )
             } catch (e: CancellationException) {
                 throw e
@@ -155,9 +169,10 @@ class PrivacyScoreViewModel @Inject constructor(
     }
 
     fun rescan() {
+        val exposure = _state.value.exposure
         scanJob?.cancel()
         scanJob = null
-        _state.value = PrivacyScoreState()
+        _state.value = PrivacyScoreState(exposure = exposure)
         startScan()
     }
 

@@ -8,6 +8,7 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -26,6 +27,11 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -37,6 +43,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -45,6 +52,7 @@ import app.radiusrf.core.lifecycle.HardwareLifecycleEffect
 import app.radiusrf.core.permission.PermissionGate
 import app.radiusrf.core.permission.PermissionUtils
 import app.radiusrf.features.proximity_radar.domain.DeviceCategory
+import app.radiusrf.features.proximity_radar.domain.ProximityCalculator
 import app.radiusrf.features.proximity_radar.domain.RadarState
 import app.radiusrf.features.proximity_radar.viewmodel.ProximityRadarViewModel
 import app.radiusrf.ui.theme.BackgroundDark
@@ -57,6 +65,7 @@ import kotlin.math.cos
 import kotlin.math.min
 import kotlin.math.sin
 import app.radiusrf.core.ui.zd.ZdCard
+import app.radiusrf.core.ui.zd.ZdIconButton
 import app.radiusrf.core.ui.zd.ZdFootnote
 import app.radiusrf.core.ui.zd.ZdIcons
 import app.radiusrf.core.ui.zd.ZdListCard
@@ -69,6 +78,7 @@ import app.radiusrf.core.ui.zd.ZdToolScanBar
 import app.radiusrf.ui.theme.ZdColors
 import app.radiusrf.ui.theme.ZdType
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.clickable
 import androidx.compose.ui.text.style.TextAlign
 import java.util.Locale
 
@@ -97,6 +107,11 @@ fun ProximityRadarScreen(
 @Composable
 private fun ProximityRadarContent(viewModel: ProximityRadarViewModel) {
     val state by viewModel.state.collectAsState()
+    var zoomedRadius by remember { mutableStateOf<Float?>(null) }
+    val shownRadius = zoomedRadius ?: state.scanRadius
+    val zoomBy: (Float) -> Unit = { factor ->
+        zoomedRadius = ProximityCalculator.zoomRadius(zoomedRadius ?: state.scanRadius, factor)
+    }
 
     HardwareLifecycleEffect(
         isActive = state.isScanning,
@@ -123,12 +138,26 @@ private fun ProximityRadarContent(viewModel: ProximityRadarViewModel) {
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             state.error?.let { item { ZdFootnote(it, icon = ZdIcons.Warning) } }
-            item { RadarView(state = state) }
+            item { RadarView(state = state, shownRadius = shownRadius, onZoom = zoomBy) }
             item {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                     ZdTag("BLE ${state.bleCount}", color = ZdColors.Info, background = ZdColors.InfoBg, border = ZdColors.InfoBorder)
                     ZdTag("WiFi ${state.wifiCount}", color = ZdColors.Accent, background = ZdColors.AccentBg, border = ZdColors.AccentBorder)
-                    Text("scale ${state.scanRadius.toInt()} m", style = ZdType.Path, color = ZdColors.Text3, modifier = Modifier.weight(1f), textAlign = TextAlign.End)
+                    if (zoomedRadius != null) {
+                        Text(
+                            "Fit",
+                            style = ZdType.Path,
+                            color = ZdColors.Accent,
+                            modifier = Modifier.clickable { zoomedRadius = null }
+                        )
+                    }
+                    Text(
+                        "scale ${formatMeters(shownRadius)}",
+                        style = ZdType.Path,
+                        color = ZdColors.Text3,
+                        modifier = Modifier.weight(1f),
+                        textAlign = TextAlign.End
+                    )
                 }
             }
             if (state.devices.isEmpty()) {
@@ -179,7 +208,7 @@ private fun formatMeters(m: Float): String = if (m < 10f) String.format(Locale.U
 // ---------------------------------------------------------------------------
 
 @Composable
-private fun RadarView(state: RadarState) {
+private fun RadarView(state: RadarState, shownRadius: Float, onZoom: (Float) -> Unit) {
     val infiniteTransition = rememberInfiniteTransition(label = "radarSweep")
 
     val sweepAngle by infiniteTransition.animateFloat(
@@ -204,6 +233,9 @@ private fun RadarView(state: RadarState) {
     )
 
     val textMeasurer = rememberTextMeasurer()
+    val zoom = rememberUpdatedState(onZoom)
+    val canZoomIn = shownRadius > ProximityCalculator.MIN_ZOOM_RADIUS_M
+    val canZoomOut = shownRadius < ProximityCalculator.MAX_ZOOM_RADIUS_M
 
     ZdCard(contentPadding = PaddingValues(10.dp)) {
         Box(
@@ -216,10 +248,15 @@ private fun RadarView(state: RadarState) {
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(16.dp)
+                    .pointerInput(Unit) {
+                        detectTransformGestures { _, _, scale, _ ->
+                            if (scale != 1f) zoom.value(scale)
+                        }
+                    }
             ) {
                 val canvasCenter = center
                 val radius = min(size.width, size.height) / 2f
-                val scanRadius = state.scanRadius
+                val scanRadius = shownRadius
 
                 // -- Background circle -------------------------------------------
                 drawCircle(
@@ -307,7 +344,8 @@ private fun RadarView(state: RadarState) {
 
                 // -- Device dots -------------------------------------------------
                 state.devices.forEach { device ->
-                    val distanceFraction = (device.estimatedDistanceM / scanRadius).coerceIn(0f, 1f)
+                    if (device.estimatedDistanceM > scanRadius) return@forEach
+                    val distanceFraction = device.estimatedDistanceM / scanRadius
                     val deviceRadius = radius * distanceFraction
                     val angleRad = Math.toRadians(device.angle.toDouble())
                     val dotX = canvasCenter.x + deviceRadius * cos(angleRad).toFloat()
@@ -379,6 +417,22 @@ private fun RadarView(state: RadarState) {
                     color = TerminalGreen,
                     radius = 3f,
                     center = canvasCenter
+                )
+            }
+            Column(Modifier.align(Alignment.BottomEnd)) {
+                ZdIconButton(
+                    ZdIcons.Plus,
+                    contentDescription = "Zoom in",
+                    onClick = { zoom.value(2f) },
+                    enabled = canZoomIn,
+                    tint = TerminalGreen
+                )
+                ZdIconButton(
+                    ZdIcons.Minus,
+                    contentDescription = "Zoom out",
+                    onClick = { zoom.value(0.5f) },
+                    enabled = canZoomOut,
+                    tint = TerminalGreen
                 )
             }
         }

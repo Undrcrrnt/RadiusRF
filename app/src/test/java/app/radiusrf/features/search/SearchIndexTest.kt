@@ -24,6 +24,11 @@ class SearchIndexTest {
     }
 
     @Test
+    fun `beta status is searchable`() {
+        assertEquals("SDR Radio", SearchIndex.tools(tools, "beta test").single().name)
+    }
+
+    @Test
     fun `matching ignores case`() {
         assertEquals(SearchIndex.tools(tools, "wifi"), SearchIndex.tools(tools, "WiFi"))
     }
