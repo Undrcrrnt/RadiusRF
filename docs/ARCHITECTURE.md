@@ -61,15 +61,16 @@ app/src/main/java/app/radiusrf/
 │   ├── ui/                          # TerminalCard, EmptyState, ScanningIndicator,
 │   │                                  StatusIndicator, EthicalUseDialog, HelpContent
 │   └── util/                        # FrequencyUtils, ByteArrayExt
-├── features/                        # 29 tools — one package each (see below)
+├── features/                        # 39 tools — one package each (see below)
 │   ├── dashboard/  alert_center/  sensors/  wifi/  ble/  nfc/  bluetooth_classic/  ir/  uwb/
-│   ├── sdr/  ultrasonic/  usb/  usbcamera/  gps/  celltower/  wardriving/
-│   ├── wifi_direct/  wifiaware/  emf_mapper/  camera/  hidden_camera/
-│   ├── gps_spoof_detector/  bluetooth_tracker/  rogue_ap_detector/
+│   ├── sdr/  ultrasonic/  usb/  usbcamera/  gps/  celltower/  wardriving/  run_compare/
+│   ├── wifi_direct/  wifiaware/  emf_mapper/  camera/  hidden_camera/  locate/
+│   ├── gps_spoof_detector/  bluetooth_tracker/  rogue_ap_detector/  signatures/
+│   ├── connection_log/  ftm/  meshtastic/  field/
 │   └── network_scanner/  rf_bug_sweeper/  proximity_radar/  privacy_score/
 │       deauth_detector/  signal_logger/
 ├── navigation/
-│   ├── RadiusRfScreen.kt          # 29 screen definitions, 5 categories
+│   ├── RadiusRfScreen.kt          # 39 tools plus Home, Alerts, Sessions, Sweep, Search, Settings
 │   ├── AppNavigation.kt            # NavHost + drawer + help system
 │   └── DrawerContent.kt            # Terminal-styled navigation drawer
 └── ui/theme/

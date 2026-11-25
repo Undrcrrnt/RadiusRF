@@ -10,22 +10,18 @@
 
 <p align="center">
   <strong>Security research and analysis toolkit.</strong><br/>
-  Turn your phone into a portable RF lab, network analyzer, and security auditor — <b>29 tools in one app</b>.
-</p>
-
-<p align="center">
-  <sub>Replaces Termux + a dozen single-purpose scanner apps with one native, offline, permission-scoped toolkit.</sub>
+  Turn your phone into a portable RF lab, network analyzer, and security auditor — <b>39 tools in one app</b>.
 </p>
 
 ---
 
 ## ⚡ At a Glance
 
-RadiusRF exposes every radio, sensor, and port your phone has — WiFi, Bluetooth, BLE, NFC, IR, UWB, USB, GPS, cellular, magnetometer, barometer, microphone — through **29 specialized tools** wrapped in a terminal-hacker UI.
+RadiusRF exposes every radio, sensor, and port your phone has — WiFi, Bluetooth, BLE, NFC, IR, UWB, USB, GPS, cellular, magnetometer, barometer, microphone — through **39 tools** wrapped in a terminal-hacker UI.
 
 |  |  |
 |---|---|
-|  **29 tools** | Across 5 categories: Wireless · RF & Signals · Sensors · Network · Security |
+|  **39 tools** | Detect threats · Scan · Analyze · Read / write · Log |
 |  **Every radio** | WiFi, BLE, Classic BT, NFC, IR, UWB, SDR, cellular, GPS |
 |  **Zero idle battery** | No auto-start scanning, everything auto-stops, all services lazy-loaded |
 |  **Privacy-first** | Runs 100% on-device · no account · permissions requested only when needed |
@@ -62,79 +58,85 @@ No single app detects all of these. Security pros carry a bag of separate gadget
 
 Every tool solves a specific, real problem. Full step-by-step docs live in the **[📖 Complete Tool Guide →](docs/TOOLS.md)**.
 
+The Tools screen lists **39 tools** in five groups. Step-by-step manuals are in the **[Complete Tool Guide](docs/TOOLS.md)**.
+
 <details open>
-<summary><b>📡 Wireless</b></summary>
+<summary><b>Detect threats · 11</b></summary>
 
 | Tool | What it does |
 |------|--------------|
-| **WiFi Analyzer** | Scans networks, finds channel congestion, flags weak security (OPEN/WEP/WPA). Cards, Compact, and Links views, including clients heard on a USB adapter |
-| **BLE Scanner** | Discovers BLE devices with full GATT explorer, distance estimates, JSON dumps |
-| **NFC Tools** | Reads NDEF, dumps MIFARE Classic sectors, emulates tags via HCE |
-| **Bluetooth Classic** | Discovery, SDP service listing, SPP serial connections |
-| **Wi-Fi Aware** | NAN device-to-device discovery without a router |
-| **Wi-Fi Direct** | Peer discovery, group formation, direct P2P file transfer |
-</details>
-
-**Locate** follows one Wi-Fi access point or one Bluetooth device while you walk. The cue says whether that target is getting louder or quieter. It does not give a compass heading or a distance in meters.
-
-On Wi-Fi, open a network in WiFi Analyzer and tap **Locate**. The phone radio compares one scan with the next, so hold still between scans. A T2U Plus or PAU0A compares beacons over a few seconds and does not join the network. The phone shows strength in dBm, where closer to zero is stronger. The adapter shows its own signal index, where a higher number, toward 100, is stronger.
-
-On Bluetooth, open a BLE device and tap **Locate**, or tap **Locate** on a sweep finding. The screen compares the last couple of seconds of advertisements with a few seconds earlier. A device that randomizes its address can drop out while you are following it. Beeps tick faster as the signal gets stronger.
-
-<details>
-<summary><b>📻 RF & Signals</b></summary>
-
-| Tool | What it does |
-|------|--------------|
-| **IR Remote** | Pre-built Samsung/LG/Sony remotes, custom protocols, Flipper Zero `.ir` import |
-| **UWB Radar** | FiRa compliance & capability check (ranging, AoA, ToF) |
-| **SDR Radio** | RTL-SDR and HackRF spectrum, waterfall, and AM/FM/SSB/CW. Band sweep, OpenDroneID, phone GNSS check, and CoT export. |
-| **Fox Hunt** | Compass, strength trace, and map for the heading where one Wi-Fi, Bluetooth, or SDR signal is strongest |
-| **Field Map** | Offline pins for wardrive logs, Remote ID aircraft and operator, and the fox-hunt bearing |
-| **Ultrasonic Analyzer** | FFT spectrum of 18–24 kHz to flag possible ultrasonic tracking beacons |
+| **Tracker Scanner** | Find My, Tile, SmartTag, Chipolo, and Find Hub. A tag still with its owner stays quiet. Separated tags can alert. Places are saved on the phone. |
+| **Hidden Camera** | Wi-Fi vendor and name, BLE, magnetometer, and open video ports |
+| **Rogue AP** | Evil twins, look-alike names, and karma hotspots |
+| **Deauth Detector** | Deauthentication and disassociation frames on a USB adapter. Nothing is transmitted. |
+| **Cell Tower** | Serving cell and neighbours, with drops to 2G called out |
+| **GPS Spoof** | Seven checks of GPS against cell, Wi-Fi, and sensors |
+| **RF Bug Sweeper** | BLE module names, ultrasonic tones, and magnetic anomalies |
+| **USB Devices** | USB interfaces, including a keyboard-plus-storage combination |
+| **QR Scanner** | Decodes a code and checks the link before it is opened |
+| **Privacy Score** | Weighted checks across Wi-Fi, Bluetooth, the device, the network, and physical sensors. A separate list shows what any app can read. |
+| **Signature Watch** | Find Hub, camera-glasses names, action cams, and serial-module names |
 </details>
 
 <details>
-<summary><b>🎚️ Sensors</b></summary>
+<summary><b>Scan · 11</b></summary>
 
 | Tool | What it does |
 |------|--------------|
-| **Sensor Dashboard** | Accelerometer, gyroscope, magnetometer, barometer, compass, level, metal detector |
-| **QR Scanner** | Scans + analyzes codes for phishing URLs & suspicious TLDs before opening |
-| **USB Camera** | UVC camera detection with resolution & capability listing |
-| **GPS Tracker** | Live position, GNSS satellite list, raw NMEA log |
-| **EMF Mapper** | Magnetometer field mapping with baseline deviation & hotspots |
+| **WiFi Analyzer** | Networks, channels, and weak security. Cards, Compact, and Links, including clients heard on a USB adapter |
+| **BLE Scanner** | Devices, GATT explorer, and JSON dumps |
+| **Bluetooth Classic** | Discovery, SDP services, and an SPP serial terminal |
+| **Network Scanner** | Hosts, ports, banners, mDNS, and SSDP on the LAN you are joined to |
+| **Connection Log** | This phone’s apps, hosts, and bytes, plus a PCAP. A local VPN forwards IPv4. IPv6 stays on the normal connection. |
+| **Proximity Radar** | Nearby devices plotted by estimated distance. Pinch to zoom. |
+| **FTM Ranging** | 802.11mc distance to access points that answer |
+| **Meshtastic Listen** | Meshtastic Bluetooth advertisements, without joining the mesh |
+| **Wi-Fi Aware** | Router-less NAN discovery |
+| **SDR Radio** | Receive console: waterfall, audio, and decoders. Status: Beta Test. |
+| **USB Camera** | UVC modes and preview |
 </details>
 
 <details>
-<summary><b>🌐 Network</b></summary>
+<summary><b>Analyze · 8</b></summary>
 
 | Tool | What it does |
 |------|--------------|
-| **USB Devices** | Full USB inspection + BadUSB (HID + Mass Storage) detection |
-| **Cell Tower Analyzer** | Serving cell and neighbours: identity, channel, and signal. A neighbour row opens the same fields as the registered cell. |
+| **ISM Decoder** | Names 315/433/868/915 MHz sensor bursts from pulse timing |
+| **ADS-B / AIS** | Nearby aircraft on 1090 MHz and ships on 162 MHz |
+| **Fox Hunt** | The compass heading where one tuned frequency is strongest |
+| **Ultrasonic** | 18–24 kHz spectrum for narrow tones |
+| **EMF Mapper** | Magnetic-field grid and hotspots |
+| **Sensor Dashboard** | Motion, compass, level, and a metal detector |
+| **GPS Tracker** | Position, satellites, and raw NMEA |
+| **UWB Radar** | FiRa ranging and angle of arrival, on phones that have UWB |
+</details>
+
+<details>
+<summary><b>Read / write · 3</b></summary>
+
+| Tool | What it does |
+|------|--------------|
+| **NFC Tools** | Read and write NDEF, dump MIFARE Classic, emulate a Type 4 tag |
+| **IR Remote** | TV remotes and Flipper `.ir` import, on phones with an IR blaster |
+| **Wi-Fi Direct** | P2P groups and file transfer |
+</details>
+
+<details>
+<summary><b>Log · 6</b></summary>
+
+| Tool | What it does |
+|------|--------------|
+| **Field Map** | Survey pins, Bluetooth and Wi-Fi Remote ID, fox-hunt bearing, and mapped cameras |
+| **Signal Logger** | Wi-Fi and BLE arrival and departure timeline |
 | **Wardriving** | GPS + Wi-Fi log. Export WiGLE, Kismet, airodump-ng, PCAPNG, and CSV |
 | **Wardriving +** | GPS + Wi-Fi + Bluetooth, same exports |
 | **Wardriving ++** | GPS + Wi-Fi + Bluetooth + cellular, same exports |
+| **Run Compare** | Devices that stayed with you across saved wardriving runs |
 </details>
 
-<details>
-<summary><b>🛡️ Security</b></summary>
+**Locate** follows one Wi-Fi access point or one Bluetooth device while you walk. The cue says whether that target is getting louder or quieter. It does not give a compass heading or a distance in meters. It is opened from WiFi Analyzer, BLE Scanner, or a sweep finding, and it is not one of the 39 tools.
 
-| Tool | What it does |
-|------|--------------|
-| **Hidden Camera Detector** | 5 methods: WiFi OUI, SSID, BLE, magnetometer, port scan |
-| **GPS Spoof Detector** | 7 cross-validation checks (GPS vs cell/WiFi/barometer/accelerometer) |
-| **Tracker Scanner** | Find My advertisements, Tile’s service, and Chipolo’s company ID. Marks a device heard in 3 places. |
-| **Rogue AP Detector** | 6 algorithms: evil twin, SSID spoofing, karma, open impersonator |
-| **Network Scanner** | Subnet-wide port scan, banner grabbing, vulnerability assessment |
-| **RF Bug Sweeper** | BLE module + ultrasonic + magnetic anomaly sweep |
-| **Proximity Radar** | Visual radar plotting devices by estimated distance & signal |
-| **Privacy Score** | 16+ checks across WiFi, Bluetooth, device, network & physical security |
-| **Deauth Detector** | Receives deauth and disassoc frames on a TP-Link Archer T2U Plus or Panda PAU0A. Nothing is transmitted. |
-| **Signal Logger** | Continuous WiFi+BLE timeline with arrival/departure tracking |
-| **Alert Center** | Unified, persisted feed of every threat raised by the other Security tools |
-</details>
+**Alert Center** is the shared feed of findings from the detectors. It is a tab, not one of the 39 tools.
 
 ---
 
@@ -228,14 +230,14 @@ Not all phones have all hardware. The Dashboard shows which capabilities your de
 | Architecture | MVVM (ViewModel + StateFlow + Compose) |
 | Navigation | Jetpack Navigation Compose 2.9.8 |
 | DI | Hilt 2.60.1 |
-| Database | Room 2.8.4 (5 entities, auto-migration) |
+| Database | Room 2.8.4 (6 entities, auto-migration) |
 | Camera | CameraX 1.6.1 |
 | Barcode | ML Kit Barcode 17.3.0 + ZXing 3.5.3 |
 | Location | Play Services Location 21.4.0 |
 | Ranging | Jetpack Core UWB 1.0.0 |
 | Permissions | Accompanist Permissions |
 | Build | Gradle 9.7.0, AGP 9.3.1 |
-| Min / Target SDK | 26 (Android 8.0) / 37 |
+| Min / Target SDK | 26 (Android 8.0) / 36 · compile SDK 37 |
 </details>
 
 ---

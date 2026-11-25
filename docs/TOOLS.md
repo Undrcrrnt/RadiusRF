@@ -1,6 +1,6 @@
 # RadiusRF — Complete Tool Guide
 
-Detailed, step-by-step documentation for every tool in RadiusRF.
+Manuals for the **39 tools** on the Tools screen, plus Locate and Alert Center.
 For the project overview, screenshots, and setup, see the [main README](../README.md).
 
 [← Back to README](../README.md)
@@ -228,44 +228,96 @@ Locate runs a live Bluetooth scan and keeps only the address you picked. It comp
 
 #### 9. SDR Radio
 
-**What it solves:** You have an RTL-SDR or HackRF on USB OTG and want to see the spectrum, hear a station, sweep bands, and keep a log.
+**Status:** Beta test. The receive console is unfinished.
+
+**What it solves:** A USB receiver is plugged in and you want a waterfall, audio, or a decoder on the phone.
 
 **How to use:**
-1. Plug the receiver in through a USB-OTG adapter
-2. Open SDR Radio and tap **Rescan**, then **Connect**
-3. Pick a band or enter a frequency in MHz, choose WFM, NFM, AM, USB, LSB, or CW, set the span, and tap **Listen**
-4. Drag the spectrum to retune. Tap it to move the channel marker. Record raw IQ, sweep the band list, scan OpenDroneID, run the phone GNSS check, or export Cursor on Target XML
+1. Plug in an RTL-SDR, HackRF, Airspy, Airspy HF+, or HydraSDR
+2. Open SDR Radio and tap **Listen**
+3. Pick Audio, Scan, Glass, Aircraft, Ships, APRS, Pager, ACARS, SubGHz, FT8, Drones, or Capture
+4. Drag the waterfall or type a frequency in MHz. A decoder app tunes itself
 
-**Recognised receivers:** RTL-SDR, including the Blog V3/V4 and other RTL2832U sticks, HackRF One, Jawbreaker, and rad1o, Airspy R2/Mini, Airspy HF+, SDRplay RSP, LimeSDR-USB, bladeRF and bladeRF 2.0 micro, USRP B200-family, and ADALM-PLUTO.
+**What each app does:**
+- **Audio** — WFM, NFM, AM, USB, LSB, and CW
+- **Aircraft** — 1090 MHz Mode S
+- **Ships** — AIS
+- **APRS** — 1200 baud packet
+- **Pager** — POCSAG
+- **ACARS** — 131.550 MHz
+- **SubGHz** — names short bursts
+- **FT8** — tunes a standard USB frequency and leaves the message on the waterfall
+- **Drones** — public OpenDroneID Bluetooth broadcasts
+- **Capture** — saves the received samples on the phone
 
-**What you see:** Device name, chipset, and VID/PID, then a live spectrum and waterfall while an RTL-SDR or HackRF is listening. HackRF tunes from 1 MHz to 6 GHz. Airspy, Airspy HF+, and HydraSDR are recognised; their receive drivers are not in this build. The app does not transmit.
+Aircraft and ship positions plot on a local chart. The console tunes and listens. It does not transmit.
+
+---
+
+#### ISM Decoder
+
+**What it solves:** A short burst on 315, 433, 868, or 915 MHz is usually a sensor, and the timing often names the family.
+
+**How to use:**
+1. Plug in an RTL-SDR or HackRF
+2. Pick 315, 433, 868, or 915 MHz
+3. Start and wait for a burst
+
+Short OOK and FSK bursts are pulled from the IQ stream. Pulse widths are compared with common families: TPMS, doorbells, weather nodes, and alarm sensors. A family name is timing, not a decoded sensor ID. The dongle listens. It does not transmit.
+
+---
+
+#### ADS-B / AIS
+
+**What it solves:** Aircraft and ships broadcast their position. This reads those public messages.
+
+**How to use:**
+1. Plug in a dongle that can reach 1090 MHz or 162 MHz
+2. Pick **ADS-B** or **AIS**, then **Start**
+3. An aircraft needs two CPR frames before a position appears
+
+ADS-B reads Mode S DF17 on 1090 MHz. AIS reads public A/B messages on 162 MHz. An Airspy HF+ cannot reach 1090 MHz. A 1090 MHz or marine VHF antenna hears much farther than a stock dongle whip.
+
+---
+
+#### Meshtastic Listen
+
+**What it solves:** A Meshtastic node is nearby and you want to see it without joining the mesh.
+
+**How to use:**
+1. Tap **Start**
+2. Nodes that advertise the Meshtastic Bluetooth service are listed
+
+This lists Bluetooth advertisements. It does not join the LoRa mesh, send a packet, or open the USB receiver. Full LoRa decode needs a LoRa radio, not the phone.
 
 ---
 
 #### Fox Hunt
 
-**What it solves:** You can hear a signal and want the heading where it is strongest, the way Locate follows one Wi-Fi or Bluetooth device.
+**What it solves:** You want the compass heading where one tuned frequency is strongest.
 
 **How to use:**
-1. Open Fox Hunt
-2. Pick a Wi-Fi access point, a Bluetooth device, or **Signal meter** if SDR Radio is already listening
-3. On an SDR hunt, **Meter** is the tuned-frequency view: frequency at the top, a vertical level bar, and current and peak readings at the bottom. Compass, Strength, and Map stay available
-4. Turn slowly through a full circle
+1. Plug in a receiver and tap **Start**
+2. Enter the watch frequency. The meter measures the background for a moment, then locks its scale
+3. Sweep a directional antenna slowly left to right. The fill is the live level. The pale line is peak hold
+4. Centre the antenna on the highest peak. **Set Ref** makes that the top of the scale. **Reset Peak** clears the hold
 
-The white line is the heading of the strongest sample. **Reset bearing** starts the turn over. Strength uses the same closer / further / about the same cue as Locate. The meter reads the level at the frequency you type, and listening keeps going when you leave SDR Radio. The number is relative dB, not a calibrated dBm. The map draws that bearing from your GPS position on a local grid. One receiver does not give a range or a transmitter location. A second hunt from another place crosses the first line. The phone compass is the sensor; there is no second antenna.
+The bearing is the compass heading at that peak: a direction from where you stand, not a location. A second hunt from another spot crosses the first line. The map and heatmap plot this phone’s path. A red patch is where this phone heard the strongest signal. Import a tile archive from the folder button to keep streets offline. The hunt listens. It does not transmit.
 
 ---
 
 #### Field Map
 
-**What it solves:** You want the survey, Remote ID, and fox-hunt bearing on one plot, without a network.
+**What it solves:** Survey pins, Remote ID, and the fox-hunt bearing on one map.
 
 **How to use:**
 1. Open Field Map
-2. Switch among **Pins**, **Path**, and **List**
+2. **Pins**, **Path**, and **List** are three ways to read the same points
 3. Turn **Survey**, **Remote ID**, and **Bearing** on or off
 
-North is up. You are the centre. Survey pins come from Wardriving, Wardriving +, and Wardriving ++. Wi-Fi is green, Bluetooth is blue, cellular is gold. A Remote ID aircraft is red. Its takeoff, pilot, or fixed location, from the OpenDroneID system message, is amber and joined by a dotted line. The bearing is the white ray from Fox Hunt. The app does not download street tiles.
+Survey pins come from Wardriving, Wardriving +, and Wardriving ++. A Remote ID aircraft is red. Its takeoff, pilot, or fixed point is amber, joined by a dotted line. Bluetooth advertisements and Wi-Fi beacon broadcasts are shown together. The locations are whatever the broadcast included. The bearing is the fox-hunt heading already stored on the phone.
+
+Streets come from an imported `.mbtiles`, `.zip`, `.sqlite`, or `.gemf` archive, or from the network if you allow it. The Cameras layer shows public OpenStreetMap surveillance and ALPR tags. Unmapped cameras do not appear.
 
 ---
 
@@ -459,6 +511,24 @@ Only one of the three can log at a time. Starting another replaces the survey th
 - **PCAPNG** — Wireshark and Netseer. Wi-Fi beacons and Bluetooth LE advertisements rebuilt from the log, not a raw capture
 - **Observations CSV** — one row per sighting for a spreadsheet
 
+A USB adapter logs each device heard talking to an access point, with that access point and the GPS fix. Bluetooth rows in Wardriving + and Wardriving ++ use type BLE or BT in the WiGLE file. Cellular rows in Wardriving ++ are identified as LTE, NR, GSM, or the radio the phone reports, and they stay in the CSV and Kismet files.
+
+---
+
+#### Run Compare
+
+**What it solves:** Something on a wardrive may have stayed with you from one leg to the next.
+
+**How to use:**
+1. In Wardriving, log one leg and stop. Start a new run for the next leg
+2. Open Run Compare and check two to four of those runs
+3. Tap **Compare**. The map draws each leg and the devices that kept up
+4. Use **All** to see every match, or one chip to see a single device
+5. Tap a card for every sighting: time, signal, name, and GPS fix
+6. Tap the trash button to delete a run you no longer need
+
+Run Compare does not scan. It reads runs you already logged. A match is a Wi-Fi or Bluetooth address heard on at least two selected runs, with fixes more than 150 m apart. A radio that never leaves a stop is left out. Dashed lines are your legs. Dots are the matching device. A phone that keeps changing its address will not stay one match. A hotspot, watch, or headset you carry will match every leg. Towers are left out.
+
 ---
 
 ### Security Tools
@@ -524,7 +594,22 @@ Overall confidence score aggregated from all checks.
 **How a hit is marked:**
 - **HIGH:** the same device was heard in 3 places at least 250 m apart
 - **MEDIUM:** the advertisement was heard again, not yet in 3 places
-- **LOW:** heard once
+- **LOW:** heard once, or the Find My status says the tag is still with its owner
+
+A Find My tag still with its owner stays on the list and does not alert. A separated tag, status bit 2 set, can climb the scale above. Places at least 250 m apart are kept on the phone under **Where it was heard**. **Watch in the background** turns on the follow-me watch so the check continues after you leave this screen. Find Hub matches unnamed Google Fast Pair / Find My Device advertisements. Distance is a guess from signal strength.
+
+---
+
+#### Signature Watch
+
+**What it solves:** Some devices are worth a look because of the name or service they advertise, even when they are not a tracker.
+
+**How to use:**
+1. Tap **Start** and stay in the room or street you care about
+2. Filter by kind if the list is long
+3. Treat a match as a reason to look
+
+**What is matched:** Google Find Hub, camera-glasses names, action-cam and cheap IP-cam hotspots, and common serial-module names such as HC-05. The phone matches advertisements it already hears. It does not connect. Anyone can rename a device, so a name is a hint.
 
 ---
 
@@ -572,6 +657,33 @@ Overall confidence score aggregated from all checks.
 
 ---
 
+#### Connection Log
+
+**What it solves:** You want a record of what this phone’s own apps connected to, kept on the phone.
+
+**How to use:**
+1. Tap **Start** and allow the local VPN
+2. Read the app, the host, and the bytes for each connection
+3. **Share PCAP** writes the capture that is already on this phone
+4. Tap **Stop** so IPv4 uses the phone’s normal connection again. Stop is also on the notification
+
+The phone routes its IPv4 through a VPN that stays on the device. RadiusRF forwards each connection and writes the app, the host, and the byte counts. The same packets go into a PCAP of about 6 MB in the app’s export folder. HTTPS stays encrypted. Apps are not blocked. IPv6 stays on the phone’s normal connection. Other devices on the network are not included. Android allows one VPN at a time.
+
+---
+
+#### FTM Ranging
+
+**What it solves:** RSSI distance is a guess. Some access points can answer with a timed Wi-Fi measurement.
+
+**How to use:**
+1. Tap **Start** near the access points you want to range
+2. An access point that answers 802.11mc shows a metre reading
+3. Compare that distance with the RSSI guess on Proximity Radar
+
+Fine Timing Measurement sends a Wi-Fi round-trip time. The phone converts that time to metres. RSSI is not used for the distance. The phone and the access point both need Wi-Fi RTT. Most home routers do not answer.
+
+---
+
 #### 24. RF Bug Sweeper
 
 **What it solves:** Hidden RF transmitters, wireless microphones, or surveillance devices in a room.
@@ -592,8 +704,9 @@ Overall confidence score aggregated from all checks.
 
 **How to use:**
 1. Navigate to Proximity Radar
-2. Start scanning
-3. Watch devices appear on the radar display
+2. Start scanning and hold the phone still
+3. Pinch the radar, or tap + and −, to zoom. Tap **Fit** to show every device again
+4. Tap a dot for that device
 
 **How distance is estimated:**
 - Log-distance path loss model
@@ -616,6 +729,8 @@ Overall confidence score aggregated from all checks.
 3. Wait for the audit to complete
 4. Review your score and recommendations
 
+**What any app can read:** time zone, languages, screen, battery, storage, model and security patch, Android ID, advertising ID, paired Bluetooth names, home-screen apps, boot count, and a media ID. That list is shown beside the score and does not change it. There is no exact phone-activation timestamp.
+
 **Scoring: 0-100 with letter grade** (A+ >= 95, A >= 85, B >= 70, C >= 55, D >= 40, F < 40)
 
 **5 categories (weighted):**
@@ -635,11 +750,11 @@ Overall confidence score aggregated from all checks.
 **What it solves:** The phone's own Wi-Fi radio does not hand apps deauthentication frames. This tool listens on a USB adapter instead.
 
 **How to use:**
-1. Plug in a TP-Link Archer T2U Plus or a Panda PAU0A
+1. Plug in an RTL8821AU, RTL8812AU, RTL8814AU, MT7612U, or Panda PAU0A
 2. Open Deauth Detector and start monitoring
 3. Grant the USB permission prompt if Android shows one
 
-The Panda PAU0B is not used. The adapter receives only. It does not transmit.
+The Panda PAU0B is not used. Frames are heard on the USB adapter. The phone Wi-Fi radio is not used, and nothing is transmitted.
 
 **What is listed:**
 - A deauthentication frame, with the addresses, reason, channel, and signal when the frame carries them
