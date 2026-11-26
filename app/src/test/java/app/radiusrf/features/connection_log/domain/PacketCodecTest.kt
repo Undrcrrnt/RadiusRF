@@ -7,6 +7,17 @@ import org.junit.Test
 class PacketCodecTest {
 
     @Test
+    fun `ipv4 header checksum matches the standard vector`() {
+        val header = byteArrayOf(
+            0x45, 0x00, 0x00, 0x3c, 0x1c, 0x46, 0x40, 0x00, 0x40, 0x06,
+            0x00, 0x00,
+            0xac.toByte(), 0x10, 0x0a, 0x63,
+            0xac.toByte(), 0x10, 0x0a, 0x0c
+        )
+        assertEquals(0xb1e6, PacketCodec.checksum(header, 0, 20, 0))
+    }
+
+    @Test
     fun `built tcp packet round trips and its checksums match`() {
         val source = byteArrayOf(10, 251.toByte(), 1, 1)
         val destination = byteArrayOf(1, 2, 3, 4)

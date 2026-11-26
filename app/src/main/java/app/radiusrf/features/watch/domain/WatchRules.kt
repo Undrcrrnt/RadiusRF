@@ -47,7 +47,7 @@ data class WatchRule(
     companion object {
         const val DEFAULT_RSSI = -65
         const val DEFAULT_MINUTES = 10
-        const val FOLLOW_ME_MINUTES = 15
+        const val FOLLOW_ME_MINUTES = 10
         val RSSI_CHOICES = listOf(-55, -65, -75)
         val MINUTE_CHOICES = listOf(5, 10, 30)
 

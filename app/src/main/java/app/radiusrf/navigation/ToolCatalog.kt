@@ -74,7 +74,7 @@ object ToolCatalog {
     val tools: List<ToolInfo> by lazy {
         listOf(
             // Detect threats
-            ToolInfo(RadiusRfScreen.BluetoothTracker, "Tracker Scanner", "Find AirTags, Tiles and SmartTags near you", "/tools/trackers", ToolGroup.DETECT, HardwareRequirement.BLE, ZdIcons.Tracker),
+            ToolInfo(RadiusRfScreen.BluetoothTracker, "Tracker Scanner", "Find My, Find Hub, SmartTag, Tile, and Chipolo", "/tools/trackers", ToolGroup.DETECT, HardwareRequirement.BLE, ZdIcons.Tracker),
             ToolInfo(RadiusRfScreen.HiddenCamera, "Hidden Camera", "Check a room: WiFi OUI, BLE, magnetic, ports", "/tools/hidden-camera", ToolGroup.DETECT, HardwareRequirement.MULTI, ZdIcons.Camera),
             ToolInfo(RadiusRfScreen.RogueAp, "Rogue AP", "Spot evil twins and karma hotspots", "/tools/rogue-ap", ToolGroup.DETECT, HardwareRequirement.WIFI, ZdIcons.Wifi),
             ToolInfo(RadiusRfScreen.DeauthDetector, "Deauth Detector", "Notice floods kicking you off WiFi", "/tools/deauth", ToolGroup.DETECT, HardwareRequirement.WIFI, ZdIcons.Warning),
@@ -94,7 +94,7 @@ object ToolCatalog {
             ToolInfo(RadiusRfScreen.ConnectionLog, "Connection Log", "This phone's apps, hosts, and a PCAP", "/tools/connections", ToolGroup.SCAN, HardwareRequirement.NONE, ZdIcons.Lan),
             ToolInfo(RadiusRfScreen.ProximityRadar, "Proximity Radar", "Plot nearby devices by distance", "/tools/radar", ToolGroup.SCAN, HardwareRequirement.BLE, ZdIcons.Sweep),
             ToolInfo(RadiusRfScreen.Ftm, "FTM Ranging", "802.11mc distance to nearby access points", "/tools/ftm", ToolGroup.SCAN, HardwareRequirement.WIFI, ZdIcons.Sweep),
-            ToolInfo(RadiusRfScreen.Meshtastic, "Meshtastic Listen", "Hear Meshtastic nodes without joining", "/tools/meshtastic", ToolGroup.SCAN, HardwareRequirement.BLE, ZdIcons.Radio),
+            ToolInfo(RadiusRfScreen.Meshtastic, "Mesh Network Scanner", "Bluetooth companion links and LoRa mesh broadcasts", "/tools/meshtastic", ToolGroup.SCAN, HardwareRequirement.MULTI, ZdIcons.Radio),
             ToolInfo(RadiusRfScreen.WifiAware, "Wi-Fi Aware", "Router-less NAN peer discovery", "/tools/wifi-aware", ToolGroup.SCAN, HardwareRequirement.NAN, ZdIcons.Wifi),
             ToolInfo(RadiusRfScreen.Sdr, "SDR Radio", "Receive console: waterfall, audio, and decoders", "/tools/sdr", ToolGroup.SCAN, HardwareRequirement.OTG, ZdIcons.Radio, status = "Status: Beta Test"),
             ToolInfo(RadiusRfScreen.IsmDecoder, "ISM Decoder", "Name 315/433/868/915 MHz sensor bursts", "/tools/ism", ToolGroup.ANALYZE, HardwareRequirement.OTG, ZdIcons.Radio),

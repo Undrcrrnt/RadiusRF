@@ -88,6 +88,7 @@ private fun WifiContent(viewModel: WifiViewModel, onLocate: (WifiAccessPoint) ->
     var filter by rememberSaveable { mutableStateOf(NetworkFilter.ALL) }
     var layout by rememberSaveable { mutableStateOf(NetworkLayout.CARDS) }
     var selectedBssid by rememberSaveable { mutableStateOf<String?>(null) }
+    var showFloor by rememberSaveable { mutableStateOf(false) }
 
     HardwareLifecycleEffect(
         isActive = isScanning,
@@ -95,6 +96,11 @@ private fun WifiContent(viewModel: WifiViewModel, onLocate: (WifiAccessPoint) ->
         onResume = viewModel::resumeScan,
         onStop = viewModel::stopScan
     )
+
+    if (showFloor) {
+        FloorWalkScreen(onClose = { showFloor = false })
+        return
+    }
 
     val sorted = accessPoints.sortedByDescending { it.rssi }
 
@@ -116,6 +122,10 @@ private fun WifiContent(viewModel: WifiViewModel, onLocate: (WifiAccessPoint) ->
             }
         )
         WifiNicPicker(source = nic, onSelect = viewModel::selectSource)
+        FloorWalkEntry(
+            onOpen = { showFloor = true },
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+        )
 
         if (accessPoints.isEmpty() && !isScanning) {
             ZdStatePanel(

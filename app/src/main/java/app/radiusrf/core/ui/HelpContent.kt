@@ -34,14 +34,14 @@ object HelpContent {
 
         "bluetooth_tracker" to FeatureHelp(
             title = "Tracker Scanner",
-            description = "Find AirTags, Tiles and SmartTags near you",
+            description = "Find My, Find Hub, SmartTag, Tile, and Chipolo",
             steps = listOf(
                 "Tap Start and keep the phone with you as you move.",
                 "Watch for trackers that stay near you across places.",
                 "Tap Watch in the background to keep checking after you leave this screen.",
                 "Tap a tracker to see why it was flagged, or mark it as yours."
             ),
-            howItWorks = "Trackers advertise over Bluetooth Low Energy with a manufacturer ID or service UUID that identifies the brand. Their address rotates every few minutes, so RadiusRF follows them by signature and timing, not by MAC. A Find My tag that is still with its owner stays quiet. A separated tag that shows up in new places is the pattern that matters. Background watching uses the follow-me rule and keeps the places on this phone.",
+            howItWorks = "Trackers advertise over Bluetooth Low Energy. RadiusRF reads Find My (AirTag and other Find My tags), Find Hub’s location advertisement, Samsung SmartTag services, Tile, Chipolo, and the shared unwanted-tracker advertisement used by Apple, Google, Samsung, and Amazon. A product on one of those networks is listed as that network. The address rotates, so the advertisement key is what keeps one tag together. A tag whose advertisement says the owner is nearby stays quiet. Background watching uses the follow-me rule and keeps the places on this phone.",
             legend = listOf(
                 HelpLegend(LegendMark.TAG_BAD, "HIGH", "Seen many times over a long period"),
                 HelpLegend(LegendMark.TAG_WARN, "MEDIUM", "Seen a few times; keep watching"),
@@ -52,7 +52,10 @@ object HelpContent {
                 HelpFact("Separated AirTags", "An AirTag away from its owner sets a status bit. Tags still with their owner stay at low risk and do not alert"),
                 HelpFact("Saved path", "Places at least 250 m apart are kept on this phone and listed under Where it was heard"),
                 HelpFact("Distance is a guess", "Estimated from signal strength; can be off by 2× indoors"),
-                HelpFact("Find Hub", "Unnamed Google Fast Pair / Find My Device advertisements are treated as Find Hub")
+                HelpFact("Find Hub", "The Find Hub location advertisement is service FEAA. Ordinary Fast Pair headphones are not trackers"),
+                HelpFact("SmartTag", "Samsung SmartTag services FD5A and FD59. A Samsung phone or earbuds advertisement is not a SmartTag"),
+                HelpFact("Shared advertisement", "Service FCB2 is the unwanted-tracker advertisement. The network byte says Find My, Find Hub, SmartTag, Amazon, or another registered network"),
+                HelpFact("Cell trackers", "A GPS tracker that only talks to a cell tower does not appear in this scan")
             )
         ),
 
@@ -258,6 +261,7 @@ object HelpContent {
             steps = listOf(
                 "Tap Start. The scan keeps running until you tap Stop.",
                 "Open Channels to see which channel is least crowded.",
+                "Tap Floor walk to map the Wi-Fi this phone is joined to as you walk the room.",
                 "Tap a network for its details, or flag it as trusted."
             ),
             howItWorks = "Routers announce themselves several times a second with beacons that carry their name, channel and security. In 2.4 GHz only channels 1, 6 and 11 don’t overlap, so networks crowded onto the same channel slow each other down. Security type decides who can read your traffic.",
@@ -271,7 +275,8 @@ object HelpContent {
                 HelpFact("Android limits scans", "4 scans every 2 minutes per app"),
                 HelpFact("Location permission", "Required by Android for WiFi results; never stored"),
                 HelpFact("Hidden networks", "Shown as [hidden]; their names can’t be read"),
-                HelpFact("Clients", "Cards, Compact, and Links list devices heard talking to an access point. A USB adapter hears nearby clients. The phone radio lists this phone when it is joined. Stopping the scan keeps those clients in the scan log")
+                HelpFact("Clients", "Cards, Compact, and Links list devices heard talking to an access point. A USB adapter hears nearby clients. The phone radio lists this phone when it is joined. Stopping the scan keeps those clients in the scan log"),
+                HelpFact("Floor walk", "The camera and Play Services for AR keep a position in the room. The path uses the strength of the joined network. The picture is not saved, and the walk does not request extra Wi-Fi scans. Share image on a saved walk opens a PNG of that map")
             )
         ),
 
@@ -466,17 +471,20 @@ object HelpContent {
         ),
 
         "meshtastic" to FeatureHelp(
-            title = "Meshtastic Listen",
-            description = "Hear Meshtastic nodes without joining",
+            title = "Mesh Network Scanner",
+            description = "Bluetooth companion links and LoRa mesh broadcasts",
             steps = listOf(
-                "Tap Start.",
-                "Nodes that advertise the Meshtastic Bluetooth service are listed.",
-                "Leave the SDR for ADS-B, AIS, or ISM. This screen does not open it."
+                "Choose Bluetooth or LoRa.",
+                "Bluetooth lists the link a mesh node advertises for a phone or computer.",
+                "LoRa uses a plugged-in RTL-SDR, HackRF, Airspy, or HydraSDR and hops the common mesh channels.",
+                "The map marks where this phone heard each node."
             ),
-            howItWorks = "Meshtastic handhelds and phones advertise a Bluetooth service so an app can pair. This tool lists those advertisements. It does not join the LoRa mesh, send a packet, or stream the USB receiver.",
+            howItWorks = "Bluetooth hears companion advertisements: Meshtastic, a Meshnology node running Meshtastic, Reticulum over Bluetooth, an RNode, and a MeshCore node that puts its name in the advertisement. LoRa listens for chirp preambles. Meshtastic’s public sync word is named when it is present. Sync word 0x12 is the Semtech default used by many RNode and MeshCore setups, so those two stay on one row. The pin is this phone’s GPS fix at the moment of the hear, not a position from inside the packet.",
             facts = listOf(
-                HelpFact("Hear only", "No mesh join, no transmit"),
-                HelpFact("LoRa packets", "Full LoRa decode needs a LoRa radio, not a phone")
+                HelpFact("Hear only", "No mesh join and no transmit"),
+                HelpFact("LoRa channels", "The survey dwells on 906.875, 915, 910.525, 869.525, 868.1, and 433.92 MHz"),
+                HelpFact("Airspy HF+", "That receiver stops near 260 MHz, below the LoRa mesh bands"),
+                HelpFact("Map", "A pin needs a location fix on this phone. A node with Bluetooth off is invisible to the Bluetooth survey")
             )
         ),
 

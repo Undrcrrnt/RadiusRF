@@ -65,7 +65,7 @@ The Tools screen lists **39 tools** in five groups. Step-by-step manuals are in 
 
 | Tool | What it does |
 |------|--------------|
-| **Tracker Scanner** | Find My, Tile, SmartTag, Chipolo, and Find Hub. A tag still with its owner stays quiet. Separated tags can alert. Places are saved on the phone. |
+| **Tracker Scanner** | Find My, Find Hub, SmartTag, Tile, Chipolo, and Amazon. A tag still with its owner stays quiet. |
 | **Hidden Camera** | Wi-Fi vendor and name, BLE, magnetometer, and open video ports |
 | **Rogue AP** | Evil twins, look-alike names, and karma hotspots |
 | **Deauth Detector** | Deauthentication and disassociation frames on a USB adapter. Nothing is transmitted. |
@@ -83,14 +83,14 @@ The Tools screen lists **39 tools** in five groups. Step-by-step manuals are in 
 
 | Tool | What it does |
 |------|--------------|
-| **WiFi Analyzer** | Networks, channels, and weak security. Cards, Compact, and Links, including clients heard on a USB adapter |
+| **WiFi Analyzer** | Networks, channels, and weak security. Floor walk maps the joined network and can share a PNG. |
 | **BLE Scanner** | Devices, GATT explorer, and JSON dumps |
 | **Bluetooth Classic** | Discovery, SDP services, and an SPP serial terminal |
 | **Network Scanner** | Hosts, ports, banners, mDNS, and SSDP on the LAN you are joined to |
 | **Connection Log** | This phone’s apps, hosts, and bytes, plus a PCAP. A local VPN forwards IPv4. IPv6 stays on the normal connection. |
 | **Proximity Radar** | Nearby devices plotted by estimated distance. Pinch to zoom. |
 | **FTM Ranging** | 802.11mc distance to access points that answer |
-| **Meshtastic Listen** | Meshtastic Bluetooth advertisements, without joining the mesh |
+| **Mesh Network Scanner** | Bluetooth companion links and LoRa mesh broadcasts. Hear only. |
 | **Wi-Fi Aware** | Router-less NAN discovery |
 | **SDR Radio** | Receive console: waterfall, audio, and decoders. Status: Beta Test. |
 | **USB Camera** | UVC modes and preview |

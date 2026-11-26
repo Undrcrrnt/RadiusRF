@@ -61,6 +61,7 @@
     <uses-feature android:name="android.hardware.sensor.light" android:required="false" />
     <uses-feature android:name="android.hardware.sensor.proximity" android:required="false" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.ar" android:required="false" />
     <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
     <uses-feature android:name="android.hardware.consumerir" android:required="false" />
     <uses-feature android:name="android.hardware.usb.host" android:required="false" />
@@ -90,6 +91,8 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.RadiusRf">
+        <!-- Floor walk can run on phones without Play Services for AR. The app still opens. -->
+        <meta-data android:name="com.google.ar.core" android:value="optional" />
         <service
             android:name=".features.wardriving.service.WardrivingScanService"
             android:foregroundServiceType="location|connectedDevice"

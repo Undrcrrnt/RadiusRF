@@ -12,14 +12,28 @@ class TrackerIdentifierTest {
         name: String? = null,
         uuids: List<String> = emptyList(),
         manufacturerData: Map<Int, ByteArray> = emptyMap(),
+        serviceData: Map<String, ByteArray> = emptyMap(),
         rssi: Int = -60
     ) = BleDevice(
         name = name,
         address = "AA:BB:CC:DD:EE:FF",
         rssi = rssi,
         serviceUuids = uuids,
-        manufacturerData = manufacturerData
+        manufacturerData = manufacturerData,
+        serviceData = serviceData
     )
+
+    private fun ByteArray.toHex(): String = joinToString("") { "%02x".format(it) }
+
+    private fun bytes(vararg parts: ByteArray): ByteArray {
+        val out = ByteArray(parts.sumOf { it.size })
+        var at = 0
+        parts.forEach { part ->
+            part.copyInto(out, at)
+            at += part.size
+        }
+        return out
+    }
 
     @Test
     fun `identifies Find My by manufacturer payload`() {
@@ -66,10 +80,86 @@ class TrackerIdentifierTest {
     }
 
     @Test
-    fun `identifies Find Hub by unnamed Fast Pair`() {
+    fun `Fast Pair headphones are not trackers`() {
         assertEquals(
-            TrackerType.FIND_HUB,
-            identifier.match(ble(uuids = listOf("0000fe2c-0000-1000-8000-00805f9b34fb")))?.type
+            null,
+            identifier.match(ble(name = "Galaxy Buds", uuids = listOf("0000fe2c-0000-1000-8000-00805f9b34fb")))
+        )
+    }
+
+    @Test
+    fun `identifies Find Hub by the location advertisement`() {
+        val eid = ByteArray(20) { (it + 1).toByte() }
+        val payload = bytes(byteArrayOf(0x41), eid, byteArrayOf(0x00))
+        val match = identifier.match(
+            ble(serviceData = mapOf("0000feaa-0000-1000-8000-00805f9b34fb" to payload))
+        )
+        assertEquals(TrackerType.FIND_HUB, match?.type)
+        assertEquals(OwnerState.SEPARATED, match?.owner)
+        assertEquals("findhub:" + eid.toHex(), match?.identity)
+    }
+
+    @Test
+    fun `Eddystone on the same service is not Find Hub`() {
+        val payload = byteArrayOf(0x10) + ByteArray(20)
+        assertEquals(
+            null,
+            identifier.match(ble(serviceData = mapOf("0000feaa-0000-1000-8000-00805f9b34fb" to payload)))
+        )
+    }
+
+    @Test
+    fun `identifies a separated SmartTag and ignores a paired one for alerts`() {
+        val privacy = byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8)
+        val lost = bytes(byteArrayOf(0x12, 0, 0, 0), privacy, byteArrayOf(0, 0, 0, 0))
+        val match = identifier.match(
+            ble(serviceData = mapOf("0000fd5a-0000-1000-8000-00805f9b34fb" to lost))
+        )
+        assertEquals(TrackerType.SMARTTAG, match?.type)
+        assertEquals(OwnerState.SEPARATED, match?.owner)
+        assertEquals("smarttag:" + privacy.toHex(), match?.identity)
+
+        val paired = bytes(byteArrayOf(0x15, 0, 0, 0), privacy, byteArrayOf(0, 0, 0, 0))
+        assertEquals(
+            OwnerState.WITH_OWNER,
+            identifier.match(ble(serviceData = mapOf("0000fd5a-0000-1000-8000-00805f9b34fb" to paired)))?.owner
+        )
+        assertEquals(
+            TrackingRisk.LOW,
+            identifier.assessRisk(tracker(TrackerType.SMARTTAG, 3, places = 3).copy(owner = OwnerState.WITH_OWNER))
+        )
+    }
+
+    @Test
+    fun `a Samsung phone advertisement is not a SmartTag`() {
+        assertEquals(null, identifier.match(ble(manufacturerData = mapOf(0x0075 to ByteArray(20)))))
+    }
+
+    @Test
+    fun `identifies the shared unwanted tracker advertisement by network`() {
+        val google = identifier.match(
+            ble(serviceData = mapOf("0000fcb2-0000-1000-8000-00805f9b34fb" to byteArrayOf(0x02, 0x00, 9, 9)))
+        )
+        assertEquals(TrackerType.FIND_HUB, google?.type)
+        assertEquals(OwnerState.SEPARATED, google?.owner)
+
+        val apple = identifier.match(
+            ble(serviceData = mapOf("0000fcb2-0000-1000-8000-00805f9b34fb" to byteArrayOf(0x01, 0x01, 4)))
+        )
+        assertEquals(TrackerType.FIND_MY, apple?.type)
+        assertEquals(OwnerState.WITH_OWNER, apple?.owner)
+
+        assertEquals(
+            TrackerType.AMAZON,
+            identifier.match(
+                ble(serviceData = mapOf("0000fcb2-0000-1000-8000-00805f9b34fb" to byteArrayOf(0x04, 0x00)))
+            )?.type
+        )
+        assertEquals(
+            TrackerType.GENERIC_TRACKER,
+            identifier.match(
+                ble(serviceData = mapOf("0000fcb2-0000-1000-8000-00805f9b34fb" to byteArrayOf(0x20, 0x00)))
+            )?.type
         )
     }
 

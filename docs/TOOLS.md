@@ -30,6 +30,8 @@ Open a network and tap **Locate** to follow that one access point. See [Locate](
 
 On the Networks tab, **Cards**, **Compact**, and **Links** are three layouts of the same scan. Links shows each access point and the stations heard talking to it. With the phone radio, the only station the scan can name is this phone, and only while it is joined to that network. A USB adapter that is receiving data or association frames can list other clients by MAC. Each client is labeled **Client** and the access point is labeled **Access point**. Open the network for the same list. Beacons do not contain the client list, so a quiet network shows no clients.
 
+**Floor walk** maps the Wi-Fi this phone is already joined to. Tap **Floor walk**, then walk the room with the camera pointed at the walls and floor. The path is colored by signal strength. Play Services for AR keeps the position. The picture is not saved. **Share image** on a saved walk opens a PNG of that map. The walk does not request extra Wi-Fi scans.
+
 **What you see per network:**
 - SSID (network name) and BSSID (hardware address)
 - Signal strength in dBm and as a percentage
@@ -280,15 +282,17 @@ ADS-B reads Mode S DF17 on 1090 MHz. AIS reads public A/B messages on 162 MHz. A
 
 ---
 
-#### Meshtastic Listen
+#### Mesh Network Scanner
 
-**What it solves:** A Meshtastic node is nearby and you want to see it without joining the mesh.
+**What it solves:** A mesh node is nearby and you want to see its companion link or its LoRa broadcast without joining the mesh.
 
 **How to use:**
-1. Tap **Start**
-2. Nodes that advertise the Meshtastic Bluetooth service are listed
+1. Choose **Bluetooth** or **LoRa**
+2. Bluetooth lists the link a node advertises for a phone or computer
+3. LoRa uses a plugged-in RTL-SDR, HackRF, Airspy, or HydraSDR and hops the common mesh channels
+4. The map marks where this phone heard each node
 
-This lists Bluetooth advertisements. It does not join the LoRa mesh, send a packet, or open the USB receiver. Full LoRa decode needs a LoRa radio, not the phone.
+Bluetooth hears companion advertisements for Meshtastic, Meshnology hardware running Meshtastic, Reticulum, RNode, and MeshCore when the name is in the advertisement. LoRa names a Meshtastic sync word when it is present. Sync word 0x12 is shared by many RNode and MeshCore setups, so those two stay on one row. The pin is this phone’s position, not a coordinate from inside the packet. An Airspy HF+ cannot tune the mesh bands. Nothing is transmitted.
 
 ---
 
@@ -588,15 +592,18 @@ Overall confidence score aggregated from all checks.
 
 **What is matched:**
 - Apple Find My, advertisement type `0x12`, tracked by the key so a rotating address stays one entry
+- Google Find Hub, service `FEAA`, when the frame is a tracker advertisement
+- Samsung SmartTag, services `FD5A` and `FD59`
 - Tile, service UUID `0000FEED-0000-1000-8000-00805F9B34FB`
 - Chipolo, company ID `0x02E5`
+- Amazon and other networks on the shared unwanted-tracker service
 
 **How a hit is marked:**
 - **HIGH:** the same device was heard in 3 places at least 250 m apart
 - **MEDIUM:** the advertisement was heard again, not yet in 3 places
-- **LOW:** heard once, or the Find My status says the tag is still with its owner
+- **LOW:** heard once, or the advertisement says the tag is still with its owner
 
-A Find My tag still with its owner stays on the list and does not alert. A separated tag, status bit 2 set, can climb the scale above. Places at least 250 m apart are kept on the phone under **Where it was heard**. **Watch in the background** turns on the follow-me watch so the check continues after you leave this screen. Find Hub matches unnamed Google Fast Pair / Find My Device advertisements. Distance is a guess from signal strength.
+A tag still with its owner stays on the list and does not alert. Places at least 250 m apart are kept on the phone under **Where it was heard**. **Watch in the background** turns on the follow-me watch. Follow-me flags an unknown tracker that stays near for 10 minutes while you move. Distance on the list is a guess from signal strength. A tracker that only uses a cell network is not visible.
 
 ---
 

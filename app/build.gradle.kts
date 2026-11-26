@@ -139,6 +139,7 @@ dependencies {
     implementation(libs.androidx.core.splashscreen)
     implementation(libs.androidx.core.uwb)
     implementation(libs.osmdroid.android)
+    implementation(libs.arcore)
 
     testImplementation(libs.junit)
     testImplementation(libs.mockk)

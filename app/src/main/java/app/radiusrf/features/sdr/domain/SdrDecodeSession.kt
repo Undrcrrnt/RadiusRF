@@ -22,6 +22,8 @@ class SdrDecodeSession(private val session: SdrSession) {
         return null
     }
 
+    fun tune(hz: Long) = session.tune(hz)
+
     fun pause() = session.pause()
     fun resume() = session.resume()
 

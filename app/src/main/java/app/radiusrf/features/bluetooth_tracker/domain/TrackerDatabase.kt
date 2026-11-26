@@ -1,7 +1,6 @@
 package app.radiusrf.features.bluetooth_tracker.domain
 
 import app.radiusrf.features.ble.domain.BleDevice
-import app.radiusrf.features.signatures.domain.DeviceSignatures
 
 // ── Data Models ──────────────────────────────────────────────────────────────
 
@@ -12,6 +11,7 @@ enum class TrackerType(val label: String) {
     SMARTTAG("SmartTag"),
     TILE("Tile"),
     CHIPOLO("Chipolo"),
+    AMAZON("Amazon"),
     PEBBLEBEE("Pebblebee"),
     GENERIC_TRACKER("Tracker"),
     UNKNOWN("Unknown")
@@ -75,40 +75,105 @@ class TrackerIdentifier {
         private const val APPLE_COMPANY_ID = 0x004C
         private const val FIND_MY_TYPE = 0x12
         private const val CHIPOLO_COMPANY_ID = 0x02E5
-        private const val TILE_SERVICE_UUID = "0000feed-0000-1000-8000-00805f9b34fb"
         private const val MIN_PLACES = 3
     }
 
     /**
-     * Find My (Apple type 0x12), Tile's service UUID, or Chipolo's company ID.
-     * Other Apple advertisements are left alone. Names are not used.
+     * Known tracker advertisements only. Names are not used, and a Samsung or
+     * Fast Pair radio is not a tracker unless the tracker payload is present.
      */
     fun match(device: BleDevice): TrackerMatch? {
         findMy(device.manufacturerData[APPLE_COMPANY_ID])?.let { found ->
             return TrackerMatch(TrackerType.FIND_MY, found.key, found.owner)
         }
-        val tile = device.serviceUuids.any { it.equals(TILE_SERVICE_UUID, ignoreCase = true) }
-        if (tile) {
-            val payload = device.serviceData.entries
-                .firstOrNull { it.key.contains("feed", ignoreCase = true) }
-                ?.value
-            val id = payload?.toHex()?.takeIf { it.isNotEmpty() } ?: device.address
-            return TrackerMatch(TrackerType.TILE, "tile:$id")
-        }
+        smartTag(device)?.let { return it }
+        findHub(device)?.let { return it }
+        unwanted(device)?.let { return it }
+        tile(device)?.let { return it }
         device.manufacturerData[CHIPOLO_COMPANY_ID]?.let { data ->
             val id = data.toHex().ifEmpty { device.address }
             return TrackerMatch(TrackerType.CHIPOLO, "chipolo:$id")
         }
-        if (DeviceSignatures.isFindHub(device)) {
-            val google = device.manufacturerData[DeviceSignatures.GOOGLE_COMPANY_ID]
-            val id = google?.toHex()?.ifEmpty { device.address } ?: device.address
-            val owner = when (google?.firstOrNull()?.toInt()?.and(0xFF)) {
-                0x41 -> OwnerState.SEPARATED
-                else -> OwnerState.UNKNOWN
-            }
-            return TrackerMatch(TrackerType.FIND_HUB, "findhub:$id", owner)
-        }
         return null
+    }
+
+    /** Samsung SmartTag service FD5A (registered) or FD59 (not registered). */
+    private fun smartTag(device: BleDevice): TrackerMatch? {
+        val data = device.servicePayload("fd5a") ?: device.servicePayload("fd59") ?: return null
+        if (data.size < 12) return null
+        val state = data[0].toInt() and 0x07
+        val owner = when (state) {
+            1, 2, 3 -> OwnerState.SEPARATED
+            4, 5, 6 -> OwnerState.WITH_OWNER
+            else -> OwnerState.UNKNOWN
+        }
+        return TrackerMatch(TrackerType.SMARTTAG, "smarttag:" + data.copyOfRange(4, 12).toHex(), owner)
+    }
+
+    /**
+     * Google Find Hub location advertisement, service FEAA.
+     * 0x41 means unwanted-tracking mode is on. 0x40 means it is off, which is
+     * not the same as the owner standing next to the tag. Eddystone also uses
+     * FEAA and starts with a different frame type, so those are left alone.
+     */
+    private fun findHub(device: BleDevice): TrackerMatch? {
+        val data = device.servicePayload("feaa") ?: return null
+        if (data.size < 21) return null
+        val marker = data[0].toInt() and 0xFF
+        if (marker != 0x40 && marker != 0x41) return null
+        val end = if (data.size == 22 || data.size == 34) data.size - 1 else data.size
+        val eid = data.copyOfRange(1, end)
+        if (eid.size < 20) return null
+        val owner = if (marker == 0x41) OwnerState.SEPARATED else OwnerState.UNKNOWN
+        return TrackerMatch(TrackerType.FIND_HUB, "findhub:" + eid.toHex(), owner)
+    }
+
+    /**
+     * Shared unwanted-tracker advertisement, service FCB2.
+     * The first service-data byte is the network. The next byte's low bit is
+     * set while the owner is nearby.
+     */
+    private fun unwanted(device: BleDevice): TrackerMatch? {
+        val data = device.servicePayload("fcb2") ?: return null
+        if (data.size < 2) return null
+        val network = data[0].toInt() and 0xFF
+        val type = when (network) {
+            0x01 -> TrackerType.FIND_MY
+            0x02 -> TrackerType.FIND_HUB
+            0x03 -> TrackerType.SMARTTAG
+            0x04 -> TrackerType.AMAZON
+            else -> TrackerType.GENERIC_TRACKER
+        }
+        val nearOwner = data[1].toInt() and 0x01 != 0
+        val body = if (data.size > 2) data.copyOfRange(2, data.size) else byteArrayOf(network.toByte())
+        return TrackerMatch(
+            type,
+            "dult:%02x:%s".format(network, body.toHex()),
+            if (nearOwner) OwnerState.WITH_OWNER else OwnerState.SEPARATED
+        )
+    }
+
+    private fun tile(device: BleDevice): TrackerMatch? {
+        val payload = device.servicePayload("feed") ?: device.servicePayload("feed0001")
+        if (payload == null && !device.advertises("feed") && !device.advertises("feed0001")) return null
+        val id = payload?.toHex()?.takeIf { it.isNotEmpty() } ?: device.address
+        return TrackerMatch(TrackerType.TILE, "tile:$id")
+    }
+
+    private fun BleDevice.servicePayload(shortId: String): ByteArray? =
+        serviceData.entries.firstOrNull { uuidMatches(it.key, shortId) }?.value
+
+    private fun BleDevice.advertises(shortId: String): Boolean =
+        serviceUuids.any { uuidMatches(it, shortId) } || serviceData.keys.any { uuidMatches(it, shortId) }
+
+    private fun uuidMatches(uuid: String, shortId: String): Boolean {
+        val text = uuid.lowercase()
+        val full = if (shortId.length == 4) {
+            "0000$shortId-0000-1000-8000-00805f9b34fb"
+        } else {
+            "$shortId-0000-1000-8000-00805f9b34fb"
+        }
+        return text.contains(full)
     }
 
     fun assessRisk(tracker: DetectedTracker): TrackingRisk {

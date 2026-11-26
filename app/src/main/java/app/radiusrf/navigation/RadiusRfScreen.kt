@@ -58,7 +58,7 @@ sealed class RadiusRfScreen(
     data object Ftm : RadiusRfScreen("ftm", "FTM Ranging")
     data object IsmDecoder : RadiusRfScreen("ism_decoder", "ISM Decoder")
     data object TrafficRadio : RadiusRfScreen("traffic_radio", "ADS-B / AIS")
-    data object Meshtastic : RadiusRfScreen("meshtastic", "Meshtastic Listen")
+    data object Meshtastic : RadiusRfScreen("meshtastic", "Mesh Network Scanner")
 
     companion object {
         // Lazy: an eager list here can capture nulls when a subclass object initializes first.

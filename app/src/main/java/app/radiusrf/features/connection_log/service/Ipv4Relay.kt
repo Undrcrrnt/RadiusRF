@@ -3,6 +3,8 @@ package app.radiusrf.features.connection_log.service
 import app.radiusrf.features.connection_log.domain.ConnectionRow
 import app.radiusrf.features.connection_log.domain.PacketCodec
 import app.radiusrf.features.connection_log.domain.PcapSink
+import android.os.Handler
+import android.os.Looper
 import java.io.InputStream
 import java.io.OutputStream
 import java.net.DatagramPacket
@@ -28,6 +30,7 @@ class Ipv4Relay(
     private val protectDatagram: (DatagramSocket) -> Boolean,
     private val appName: (protocol: Int, local: InetAddress, localPort: Int, remote: InetAddress, remotePort: Int) -> String,
     private val pcap: PcapSink,
+    private val onStopped: () -> Unit,
     private val onUpdate: (List<ConnectionRow>, String) -> Unit
 ) {
     private val running = AtomicBoolean(true)
@@ -46,29 +49,57 @@ class Ipv4Relay(
     }
 
     fun stop() {
-        if (!running.compareAndSet(true, false)) return
+        running.set(false)
         tcpFlows.values.forEach { runCatching { it.socket?.close() } }
         udpFlows.values.forEach { runCatching { it.socket.close() } }
         tcpFlows.clear()
         udpFlows.clear()
         runCatching { input.close() }
-        pool.shutdownNow()
-        pcap.close()
+        runCatching { pool.shutdownNow() }
+        runCatching { pcap.close() }
     }
 
     private fun readTun() {
-        while (running.get()) {
-            val size = try {
-                input.read(readBuffer)
-            } catch (_: Exception) {
-                break
+        try {
+            while (running.get()) {
+                val size = try {
+                    input.read(readBuffer)
+                } catch (error: Exception) {
+                    if (!running.get() || !isAgain(error) || !pause()) break
+                    continue
+                }
+                if (size < 0) break
+                if (size == 0) {
+                    if (!pause()) break
+                    continue
+                }
+                val copy = readBuffer.copyOf(size)
+                pcap.write(copy)
+                packets.offer(copy)
             }
-            if (size <= 0) break
-            val copy = readBuffer.copyOf(size)
-            pcap.write(copy)
-            packets.offer(copy)
+        } finally {
+            running.set(false)
+            Handler(Looper.getMainLooper()).post(onStopped)
         }
-        running.set(false)
+    }
+
+    private fun pause(): Boolean {
+        return try {
+            Thread.sleep(15)
+            true
+        } catch (_: InterruptedException) {
+            false
+        }
+    }
+
+    private fun isAgain(error: Throwable): Boolean {
+        var current: Throwable? = error
+        repeat(4) {
+            val text = current?.message.orEmpty()
+            if (text.contains("EAGAIN", ignoreCase = true) || text.contains("try again", ignoreCase = true)) return true
+            current = current?.cause
+        }
+        return false
     }
 
     private fun drain() {
@@ -102,7 +133,7 @@ class Ipv4Relay(
 
     private fun handle(packet: ByteArray) {
         val ip = PacketCodec.ipv4(packet) ?: return
-        if (isMulticast(ip.destination)) return
+        if (isMulticast(ip.destination) || ip.destinationText == "255.255.255.255" || ip.destinationText == "10.251.1.1") return
         when (ip.protocol) {
             PacketCodec.TCP -> {
                 val tcp = PacketCodec.tcp(packet, ip) ?: return
@@ -119,10 +150,13 @@ class Ipv4Relay(
         val id = id(PacketCodec.TCP, ip.sourceText, tcp.sourcePort, ip.destinationText, tcp.destinationPort)
         val syn = tcp.flags and 0x02 != 0 && tcp.flags and 0x10 == 0
         if (syn) {
-            if (tcpFlows.containsKey(id) || tcpFlows.size >= 80) {
-                if (!tcpFlows.containsKey(id)) {
-                    reply(ip, tcp, 0x14, ByteArray(0), null, 0, (tcp.sequence + 1) and 0xFFFFFFFF)
-                }
+            val existing = tcpFlows[id]
+            if (existing != null) {
+                if (!existing.open) emitSynAck(ip, tcp, existing)
+                return
+            }
+            if (tcpFlows.size >= 80) {
+                reply(ip, tcp, 0x14, ByteArray(0), null, 0, (tcp.sequence + 1) and 0xFFFFFFFF)
                 return
             }
             openTcp(ip, tcp, id)
@@ -132,18 +166,21 @@ class Ipv4Relay(
     }
 
     private fun openTcp(ip: PacketCodec.Ipv4, tcp: PacketCodec.Tcp, id: String) {
+        val isn = Random.nextLong().and(0xFFFFFFFF)
         val flow = TcpFlow(
+            isn = isn,
             expected = (tcp.sequence + 1) and 0xFFFFFFFF,
-            ourSeq = Random.nextLong().and(0xFFFFFFFF)
+            ourSeq = isn
         )
         tcpFlows[id] = flow
-        val row = LiveRow(id, "This phone", ip.destinationText, "TCP", tcp.destinationPort)
+        val row = LiveRow(id, "This phone", names[ip.destinationText] ?: ip.destinationText, "TCP", tcp.destinationPort)
         rows[id] = row
+        emitSynAck(ip, tcp, flow)
         publish(true)
         pool.execute {
             val socket = Socket()
             try {
-                if (!protectSocket(socket)) error("The phone would not send this connection around the log.")
+                if (!protectSocket(socket)) throw IllegalStateException("protect")
                 socket.tcpNoDelay = true
                 socket.connect(InetSocketAddress(InetAddress.getByAddress(ip.destination), tcp.destinationPort), 8_000)
                 row.app = appName(
@@ -153,11 +190,9 @@ class Ipv4Relay(
                     InetAddress.getByAddress(ip.destination),
                     tcp.destinationPort
                 )
-                row.host = names[ip.destinationText] ?: ip.destinationText
+                row.host = names[ip.destinationText] ?: row.host
                 synchronized(flow) {
                     flow.socket = socket
-                    reply(ip, tcp, 0x12, ByteArray(0), 1200, flow.ourSeq, flow.expected)
-                    flow.ourSeq = (flow.ourSeq + 1) and 0xFFFFFFFF
                     flow.open = true
                     flow.pending.forEach { chunk ->
                         socket.getOutputStream().write(chunk)
@@ -236,7 +271,7 @@ class Ipv4Relay(
                     udp.destinationPort
                 )
             }.getOrDefault("This phone")
-            val buffer = ByteArray(1280)
+            val buffer = ByteArray(2048)
             val incoming = DatagramPacket(buffer, buffer.size)
             while (running.get() && !socket.isClosed) {
                 try {
@@ -266,13 +301,17 @@ class Ipv4Relay(
         synchronized(this) {
             if (tcp.payload.isNotEmpty() && tcp.sequence == expected) {
                 PacketCodec.serverName(tcp.payload)?.let { name -> row?.host = name }
-                if (open && socket != null) {
-                    runCatching { socket!!.getOutputStream().write(tcp.payload) }
-                    if (row != null) row.sent += tcp.payload.size
-                } else if (pending.sumOf { it.size } < 64 * 1024) {
+                val kept = if (open && socket != null) {
+                    val wrote = runCatching { socket!!.getOutputStream().write(tcp.payload) }.isSuccess
+                    if (wrote && row != null) row.sent += tcp.payload.size
+                    wrote
+                } else if (pending.sumOf { it.size } + tcp.payload.size <= 64 * 1024) {
                     pending.add(tcp.payload.copyOf())
+                    true
+                } else {
+                    false
                 }
-                expected = (expected + tcp.payload.size) and 0xFFFFFFFF
+                if (kept) expected = (expected + tcp.payload.size) and 0xFFFFFFFF
             }
             if (tcp.flags and 0x01 != 0 && tcp.sequence + (if (tcp.payload.isEmpty()) 0 else tcp.payload.size) == expected) {
                 expected = (expected + 1) and 0xFFFFFFFF
@@ -284,6 +323,16 @@ class Ipv4Relay(
             reply(ip, tcp, 0x10, ByteArray(0), null, ourSeq, expected)
         }
         publish(false)
+    }
+
+    private fun emitSynAck(ip: PacketCodec.Ipv4, tcp: PacketCodec.Tcp, flow: TcpFlow) {
+        synchronized(flow) {
+            reply(ip, tcp, 0x12, ByteArray(0), 1200, flow.isn, flow.expected)
+            if (!flow.synSent) {
+                flow.ourSeq = (flow.isn + 1) and 0xFFFFFFFF
+                flow.synSent = true
+            }
+        }
     }
 
     private fun reply(
@@ -313,6 +362,7 @@ class Ipv4Relay(
         synchronized(output) {
             runCatching {
                 output.write(packet)
+                output.flush()
             }
         }
         pcap.write(packet)
@@ -349,10 +399,12 @@ class Ipv4Relay(
     )
 
     private class TcpFlow(
+        val isn: Long,
         var expected: Long,
         var ourSeq: Long,
         var socket: Socket? = null,
         var open: Boolean = false,
+        var synSent: Boolean = false,
         val pending: ArrayDeque<ByteArray> = ArrayDeque()
     )
 

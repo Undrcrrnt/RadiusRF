@@ -5,6 +5,8 @@ import android.graphics.Color
 import android.graphics.DashPathEffect
 import android.graphics.Paint
 import android.view.MotionEvent
+import android.view.ViewGroup
+import android.view.View.MeasureSpec
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -23,6 +25,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -71,23 +74,27 @@ fun FieldStreetMap(
     val archiveKey = archives.joinToString { it.name }
     val map = remember(archiveKey) {
         tiles.store.configureOsmdroid()
-        MapView(context).apply {
+        StableFieldMap(context).apply {
             setTileSource(TileSourceFactory.MAPNIK)
             setMultiTouchControls(true)
+            setBuiltInZoomControls(false)
+            isNestedScrollingEnabled = false
+            isClickable = true
+            isFocusable = true
             minZoomLevel = 3.0
             maxZoomLevel = 20.0
             controller.setZoom(17.0)
+            layoutParams = ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+            )
             overlays += FieldMarksOverlay(context.resources.displayMetrics.density)
             overlays += ScaleBarOverlay(this).apply {
                 setCentred(true)
                 setScaleBarOffset(context.resources.displayMetrics.widthPixels / 2, 14)
             }
             overlays += CopyrightOverlay(context)
-            setOnTouchListener { _, event ->
-                if (event.actionMasked == MotionEvent.ACTION_DOWN) follow = false
-                if (event.actionMasked == MotionEvent.ACTION_UP) performClick()
-                false
-            }
+            onUserGesture = { follow = false }
         }
     }
     DisposableEffect(map, lifecycleOwner) {
@@ -106,7 +113,7 @@ fun FieldStreetMap(
             map.onDetach()
         }
     }
-    Box(modifier.fillMaxWidth().height(360.dp)) {
+    Box(modifier.fillMaxWidth().height(360.dp).clipToBounds()) {
         AndroidView(
             factory = { map },
             update = { view ->
@@ -124,8 +131,8 @@ fun FieldStreetMap(
                         else -> null
                     }
                     center?.let {
-                        if (lastCentered == null || lastCentered!!.distanceToAsDouble(it) >= 1.5) {
-                            view.controller.animateTo(it)
+                        if (lastCentered == null || lastCentered!!.distanceToAsDouble(it) >= 8.0) {
+                            view.controller.setCenter(it)
                             lastCentered = it
                         }
                     }
@@ -155,6 +162,57 @@ fun FieldStreetMap(
         )
     }
     if (showTiles) OfflineMapSheet(onDismiss = { showTiles = false }, viewModel = tiles)
+}
+
+/**
+ * Pinch and drag change the map scale and center. They do not change the
+ * view's place in the scrolling page.
+ */
+private class StableFieldMap(context: android.content.Context) : MapView(context) {
+    var onUserGesture: (() -> Unit)? = null
+    private var placed = false
+    private var relayoutPosted = false
+
+    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        parent?.requestDisallowInterceptTouchEvent(true)
+        if (event.actionMasked == MotionEvent.ACTION_DOWN) onUserGesture?.invoke()
+        if (event.actionMasked == MotionEvent.ACTION_UP) performClick()
+        return super.dispatchTouchEvent(event)
+    }
+
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        val width = MeasureSpec.getSize(widthMeasureSpec).coerceAtLeast(1)
+        val height = MeasureSpec.getSize(heightMeasureSpec).coerceAtLeast(1)
+        super.onMeasure(
+            MeasureSpec.makeMeasureSpec(width, MeasureSpec.EXACTLY),
+            MeasureSpec.makeMeasureSpec(height, MeasureSpec.EXACTLY)
+        )
+        setMeasuredDimension(width, height)
+    }
+
+    override fun requestLayout() {
+        if (!placed) {
+            super.requestLayout()
+            return
+        }
+        invalidate()
+        if (relayoutPosted) return
+        relayoutPosted = true
+        post {
+            relayoutPosted = false
+            if (width > 0 && height > 0) {
+                try {
+                    onLayout(false, left, top, right, bottom)
+                } catch (_: RuntimeException) {
+                }
+            }
+        }
+    }
+
+    override fun onLayout(changed: Boolean, l: Int, t: Int, r: Int, b: Int) {
+        super.onLayout(changed, l, t, r, b)
+        placed = width > 0 && height > 0
+    }
 }
 
 private class FieldMarksOverlay(private val density: Float) : Overlay() {

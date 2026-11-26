@@ -25,6 +25,7 @@ orgJson = "20241224"
 splashscreen = "1.2.0"
 glance = "1.1.1"
 osmdroid = "6.1.20"
+arcore = "1.57.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -67,6 +68,7 @@ androidx-core-uwb = { group = "androidx.core.uwb", name = "uwb", version.ref = "
 mockk = { group = "io.mockk", name = "mockk", version.ref = "mockk" }
 org-json = { group = "org.json", name = "json", version.ref = "orgJson" }
 osmdroid-android = { group = "org.osmdroid", name = "osmdroid-android", version.ref = "osmdroid" }
+arcore = { group = "com.google.ar", name = "core", version.ref = "arcore" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

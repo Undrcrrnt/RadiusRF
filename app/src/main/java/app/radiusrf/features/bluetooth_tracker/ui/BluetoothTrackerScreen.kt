@@ -82,7 +82,7 @@ private fun BluetoothTrackerContent(viewModel: BluetoothTrackerViewModel, onOpen
             onPause = viewModel::pauseScan,
             onResume = viewModel::resumeScan,
             onStop = viewModel::stopScan,
-            runningNote = "Find My, Find Hub, Tile, Chipolo · ${state.totalDevicesScanned} devices checked",
+            runningNote = "Find My, Find Hub, SmartTag, Tile, Chipolo · ${state.totalDevicesScanned} devices checked",
             idleNote = if (state.trackers.isEmpty()) "Keep it running while you move" else "Results kept"
         )
 
@@ -99,9 +99,9 @@ private fun BluetoothTrackerContent(viewModel: BluetoothTrackerViewModel, onOpen
                 iconBackground = ZdColors.AccentBg,
                 title = if (state.isScanning) "No trackers so far" else "Is something following you?",
                 body = state.error ?: if (state.isScanning) {
-                    "Keep the phone with you and move. A Find My, Tile, or Chipolo advertisement is listed when it is heard. It is marked after it shows up in 3 places."
+                    "Keep the phone with you and move. A Find My, Find Hub, SmartTag, Tile, or Chipolo advertisement is listed when it is heard. It is marked after it shows up in 3 places."
                 } else {
-                    "Reads Find My advertisements, Tile’s service, and Chipolo’s company ID. The same tracker is marked once it has been heard in 3 places at least 250 m apart."
+                    "Reads Find My, Find Hub, Samsung SmartTag, Tile, Chipolo, and the shared unwanted-tracker advertisement. The same tracker is marked once it has been heard in 3 places at least 250 m apart."
                 },
                 primaryAction = if (state.isScanning) null else "Start scan" to viewModel::startScan,
                 primaryIcon = ZdIcons.Play
@@ -166,7 +166,7 @@ private fun BluetoothTrackerContent(viewModel: BluetoothTrackerViewModel, onOpen
                 }
             }
             item {
-                ZdFootnote("Find My devices are matched on the advertisement key, so a rotating address stays one entry. A tag still with its owner stays on the list and does not alert. Background watch keeps listening with the screen off.")
+                ZdFootnote("Find My, Find Hub, and SmartTag stay one entry while their advertisement key holds. A tag still with its owner stays on the list and does not alert. A tracker that only talks to the cell network is not in this scan. Background watch keeps listening with the screen off.")
             }
         }
     }
