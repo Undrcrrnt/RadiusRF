@@ -34,16 +34,23 @@ RadiusRF shows the radios, sensors, and ports this phone already has — Wi-Fi, 
 
 ## Screenshots
 
-Phone screens for the listing. Save each file under `docs/screenshots/` with the name in this table.
-
-| Screen | File | What it should show |
-|--------|------|---------------------|
-| Tools | `docs/screenshots/tools.png` | The tool list |
-| Wi-Fi Analyzer | `docs/screenshots/wifi.png` | Networks and channels |
-| Floor walk | `docs/screenshots/floor-walk.png` | A saved walk, or the share sheet |
-| Tracker Scanner | `docs/screenshots/trackers.png` | A tracker list |
-| Field Map | `docs/screenshots/field-map.png` | The map with pins |
-| Connection Log | `docs/screenshots/connection-log.png` | This phone’s connections, including the note that it is not a remote VPN |
+<table>
+<tr>
+<td align="center"><img src="docs/screenshots/launch.jpg" width="220" alt="RadiusRF launch screen"><br><sub>Launch</sub></td>
+<td align="center"><img src="docs/screenshots/home.jpg" width="220" alt="Home, with pinned tools and a clear sweep"><br><sub>Home</sub></td>
+<td align="center"><img src="docs/screenshots/tools.jpg" width="220" alt="The tool list"><br><sub>Tools</sub></td>
+</tr>
+<tr>
+<td align="center"><img src="docs/screenshots/sweep.jpg" width="220" alt="Starting a full room sweep"><br><sub>Sweep</sub></td>
+<td align="center"><img src="docs/screenshots/radar.jpg" width="220" alt="Proximity Radar with nearby radios"><br><sub>Proximity Radar</sub></td>
+<td align="center"><img src="docs/screenshots/locate.jpg" width="220" alt="Locate following one access point by signal"><br><sub>Locate</sub></td>
+</tr>
+<tr>
+<td align="center"><img src="docs/screenshots/locate-close.jpg" width="220" alt="Locate when the signal is very strong"><br><sub>Locate, very close</sub></td>
+<td align="center"><img src="docs/screenshots/session.jpg" width="220" alt="A saved sweep and its finding"><br><sub>A saved sweep</sub></td>
+<td align="center"><img src="docs/screenshots/sessions.jpg" width="220" alt="Sessions stored on this phone"><br><sub>Sessions, on this phone</sub></td>
+</tr>
+</table>
 
 ---
 
