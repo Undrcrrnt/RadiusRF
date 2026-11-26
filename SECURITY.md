@@ -1,8 +1,8 @@
 # Security Policy
 
-RadiusRF is a security research and RF analysis toolkit — we take vulnerabilities in the app
-itself seriously, separately from the fact that the app's *purpose* is finding vulnerabilities
-in wireless environments around the user.
+RadiusRF is a receive-only awareness app. Reports about flaws in the app itself are
+welcome. A reading the app shows about a nearby radio is a separate matter: that is the
+tool working, not a vulnerability in RadiusRF.
 
 ## Scope
 
@@ -18,7 +18,7 @@ in wireless environments around the user.
 
 **Out of scope** — these are inherent to what the app does, not bugs in it:
 
-- "RadiusRF can detect/scan X" — that's the intended function of a security toolkit
+- "RadiusRF can hear or list X" — that is the tool working as intended
 - False positives/negatives in heuristic detectors (Rogue AP, GPS Spoof, Hidden Camera, etc.) —
   please file these as regular [bug reports](.github/ISSUE_TEMPLATE/bug_report.yml) instead,
   they're accuracy issues, not security vulnerabilities

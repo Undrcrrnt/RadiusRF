@@ -22,7 +22,7 @@ For the project overview, screenshots, and setup, see the [main README](../READM
 2. Tap **Scan** to start discovery
 3. Filter by band: All / 2.4 GHz / 5 GHz
 4. Review the channel chart to find the least congested channel for your router
-5. Scan auto-stops after 30 seconds
+5. The scan keeps running while this screen is open. Leaving the screen stops it
 
 The phone radio is the default. On this screen or in Settings, choose T2U Plus or PAU0A to listen for beacons on that adapter instead. The adapter does not join a network. Deauth Detector uses the same adapter session.
 
@@ -446,7 +446,7 @@ Streets come from an imported `.mbtiles`, `.zip`, `.sqlite`, or `.gemf` archive,
 
 #### 16. USB Devices
 
-**What it solves:** A USB device plugged into your phone via OTG could be a BadUSB attack — a device that pretends to be a keyboard and types malicious commands.
+**What it solves:** Shows the interfaces on a USB device plugged into this phone, including a keyboard and storage on the same device.
 
 **How to use:**
 1. Plug in any USB device via OTG adapter
@@ -622,7 +622,7 @@ A tag still with its owner stays on the list and does not alert. Places at least
 
 #### 22. Rogue AP Detector
 
-**What it solves:** Fake WiFi access points that steal your credentials — the most common WiFi attack.
+**What it solves:** Look-alike Wi-Fi names, an open hotspot using a public name, and several names from one radio. A match is a name and a radio address. It is not proof that the network collects passwords.
 
 **6 detection algorithms:**
 
@@ -639,14 +639,14 @@ A tag still with its owner stays on the list and does not alert. Places at least
 
 #### 23. Network Scanner
 
-**What it solves:** You don't know what devices are on your network, what ports they expose, or whether they're vulnerable.
+**What it solves:** Hosts and common open ports on the LAN this phone is joined to. An open port is a note about what answered. It is not proof that the service can be broken into.
 
 **How to use:**
 1. Navigate to Network Scanner
 2. The app scans all 254 addresses in your subnet
 3. For each live host, it scans 22 common ports
 4. Banner grabbing extracts service information
-5. Vulnerability assessment flags risks
+5. An open port is labeled by how exposed that service usually is. The label is not a test that broke into the service
 
 **22 ports scanned:** FTP (21), SSH (22), Telnet (23), SMTP (25), DNS (53), HTTP (80), HTTPS (443), SMB (139/445), RTSP (554), MySQL (3306), PostgreSQL (5432), Redis (6379), MongoDB (27017), SNMP (161), MQTT (1883), RDP (3389), VNC (5900), UPnP (1900), Printer/IPP (631/9100), ONVIF (3702), HTTP alt (8080).
 
@@ -669,12 +669,12 @@ A tag still with its owner stays on the list and does not alert. Places at least
 **What it solves:** You want a record of what this phone’s own apps connected to, kept on the phone.
 
 **How to use:**
-1. Tap **Start** and allow the local VPN
+1. Tap **Start** and allow the local traffic log. Android calls this a VPN
 2. Read the app, the host, and the bytes for each connection
 3. **Share PCAP** writes the capture that is already on this phone
 4. Tap **Stop** so IPv4 uses the phone’s normal connection again. Stop is also on the notification
 
-The phone routes its IPv4 through a VPN that stays on the device. RadiusRF forwards each connection and writes the app, the host, and the byte counts. The same packets go into a PCAP of about 6 MB in the app’s export folder. HTTPS stays encrypted. Apps are not blocked. IPv6 stays on the phone’s normal connection. Other devices on the network are not included. Android allows one VPN at a time.
+Android’s VPN interface is the only way an app can see this phone’s own packets. RadiusRF uses that interface to observe and forward IPv4. It is not a VPN: nothing is encrypted for the tunnel, and traffic is not sent to a remote server. RadiusRF writes the app, the host, and the byte counts. The same packets go into a PCAP of about 6 MB in the app’s export folder. HTTPS stays encrypted by the apps. Apps are not blocked. IPv6 stays on the phone’s normal connection. Other devices on the network are not included. Android allows one VPN at a time, so stop any other VPN first.
 
 ---
 

@@ -341,15 +341,16 @@ object HelpContent {
             title = "Connection Log",
             description = "This phone's apps, hosts, and a PCAP",
             steps = listOf(
-                "Tap Start and allow the local VPN.",
+                "Tap Start and allow the local traffic log. Android calls this a VPN.",
                 "Read the app, the host, and the bytes for each connection.",
                 "Share PCAP to save the capture that is already on this phone.",
                 "Tap Stop so IPv4 uses the phone's normal connection again."
             ),
-            howItWorks = "The phone routes its IPv4 through a VPN that stays on the device. RadiusRF forwards each connection and writes the app, the host, and the byte counts. The same packets go into a PCAP in the app's export folder. HTTPS stays encrypted. IPv6 stays on the phone's normal connection.",
+            howItWorks = "Android’s VPN interface is the only way an app can see this phone’s own packets. RadiusRF uses that interface to observe and forward IPv4. It is not a VPN: nothing is encrypted for the tunnel, and traffic is not sent to a remote server. RadiusRF writes the app, the host, and the byte counts. The same packets go into a PCAP in the app's export folder. HTTPS stays encrypted by the apps. IPv6 stays on the phone's normal connection.",
             facts = listOf(
+                HelpFact("Not a VPN", "The VPN interface is only used to observe this phone’s packets. Traffic is not encrypted here or sent to a server"),
                 HelpFact("This phone only", "Other devices on the network are not included"),
-                HelpFact("One VPN", "Android allows one VPN at a time, so stop any other VPN first"),
+                HelpFact("One VPN slot", "Android allows one VPN at a time, so stop any other VPN first"),
                 HelpFact("PCAP limit", "The capture stops growing at about 6 MB"),
                 HelpFact("Forwarded", "Apps are not blocked. Their traffic is passed through")
             )

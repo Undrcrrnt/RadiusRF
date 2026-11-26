@@ -50,7 +50,7 @@ fun ConnectionLogScreen(viewModel: ConnectionLogViewModel = hiltViewModel()) {
                     if (intent == null) viewModel.start() else consent.launch(intent)
                 },
                 primaryIcon = ZdIcons.Play,
-                note = "A local VPN on this phone forwards IPv4 so the list and the PCAP can be written here. IPv6 stays on the phone's normal connection."
+                note = "Android’s VPN interface is used only to observe this phone’s IPv4. It is not a VPN: traffic is not encrypted here or sent to a server. IPv6 stays on the phone’s normal connection."
             )
             return@Column
         }

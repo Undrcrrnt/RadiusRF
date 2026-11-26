@@ -5,52 +5,59 @@
 <h1 align="center">RadiusRF</h1>
 
 <p align="center">
-  A security research and analysis toolkit for Android.
+  A receive-only radio and network awareness app for Android.
 </p>
 
 <p align="center">
-  <strong>Security research and analysis toolkit.</strong><br/>
-  Turn your phone into a portable RF lab, network analyzer, and security auditor — <b>39 tools in one app</b>.
+  <strong>See what this phone can already hear.</strong><br/>
+  Wi-Fi, Bluetooth, cellular, GPS, and optional USB receivers — <b>39 tools in one app</b>. Nothing is sent to attack a network.
 </p>
 
 ---
 
 ## ⚡ At a Glance
 
-RadiusRF exposes every radio, sensor, and port your phone has — WiFi, Bluetooth, BLE, NFC, IR, UWB, USB, GPS, cellular, magnetometer, barometer, microphone — through **39 tools** wrapped in a terminal-hacker UI.
+RadiusRF shows the radios, sensors, and ports this phone already has — Wi-Fi, Bluetooth, BLE, NFC, IR, UWB, USB, GPS, cellular, magnetometer, barometer, and microphone — through **39 tools**. A scan starts when you open a tool and tap start. It stops when you leave that screen.
 
 |  |  |
 |---|---|
 |  **39 tools** | Detect threats · Scan · Analyze · Read / write · Log |
-|  **Every radio** | WiFi, BLE, Classic BT, NFC, IR, UWB, SDR, cellular, GPS |
-|  **Zero idle battery** | No auto-start scanning, everything auto-stops, all services lazy-loaded |
-|  **Privacy-first** | Runs 100% on-device · no account · permissions requested only when needed |
-|  **Android 8.0+** | Min SDK 26, target SDK 36 · works best on Android 12+ |
+|  **Radios** | Wi-Fi, BLE, Classic Bluetooth, NFC, IR, UWB, cellular, GPS, and optional USB receivers |
+|  **No idle scan** | Nothing starts on its own. Services load when a tool needs them |
+|  **On this phone** | No account. Logs stay on the device. Map tiles and Play Services for AR are the exceptions. A file leaves only when you share it |
+|  **Android 8.0+** | Min SDK 26, target SDK 36 |
 |  **Stack** | Kotlin · Jetpack Compose · Material 3 |
 
-> Built for penetration testers, security researchers, RF engineers — and anyone curious about the invisible wireless world around them.
+> For a person checking the signals around their own phone, and for network work they are allowed to do.
 
 ---
 
-## 📸 Screenshots
+## Screenshots
 
-Screenshots will be added here.
+Phone screens for the listing. Save each file under `docs/screenshots/` with the name in this table.
+
+| Screen | File | What it should show |
+|--------|------|---------------------|
+| Tools | `docs/screenshots/tools.png` | The tool list |
+| Wi-Fi Analyzer | `docs/screenshots/wifi.png` | Networks and channels |
+| Floor walk | `docs/screenshots/floor-walk.png` | A saved walk, or the share sheet |
+| Tracker Scanner | `docs/screenshots/trackers.png` | A tracker list |
+| Field Map | `docs/screenshots/field-map.png` | The map with pins |
+| Connection Log | `docs/screenshots/connection-log.png` | This phone’s connections, including the note that it is not a remote VPN |
 
 ---
 
-## 🎯 The Problem
+## What a reading means
 
-Your phone sits in a sea of invisible signals. Right now, within meters of you:
+A row in this app is a report from the phone or from an attached receiver. It is a reason to look, not proof that a device is hostile, and a quiet screen is not proof that nothing is there.
 
--  **Hidden cameras** may be streaming over WiFi or BLE — invisible to you.
--  **AirTags / SmartTags** could be tracking your location without your knowledge.
--  **Rogue WiFi hotspots** (evil twins) mimic real networks to steal credentials.
--  **IMSI catchers** (Stingrays) force your phone to 2G to intercept calls & texts.
--  **Ultrasonic beacons** (18–24 kHz) track you across devices through your mic.
--  **Deauth attacks** kick you off WiFi — disguised as "bad signal".
--  **BadUSB devices** pretend to be keyboards to type malicious commands.
-
-No single app detects all of these. Security pros carry a bag of separate gadgets; regular users have nothing. **RadiusRF puts them all in one place.**
+- **Trackers.** Find My, Find Hub, SmartTag, Tile, Chipolo, and Amazon advertisements. A tag that is still with its owner stays quiet. A tracker that uses only the cell network is invisible here.
+- **Wi-Fi.** Network names, channels, weak security, and look-alike names. Floor walk maps the network this phone is already joined to.
+- **Cell.** The serving cell, the neighbours, and a note when the phone drops to 2G. That note is a change in the record. It is not an identification of a cell-site simulator.
+- **Deauth Detector.** Deauthentication and disassociation frames heard on a USB adapter. The tool does not transmit.
+- **USB.** The interfaces on a plugged-in device, including a keyboard and storage together.
+- **Ultrasonic.** Narrow tones between 18 and 24 kHz, when you start that tool.
+- **Connection Log.** This phone’s own apps, hosts, and bytes. Android’s VPN interface is used only to observe and forward IPv4. It is not a remote VPN.
 
 ---
 
@@ -87,7 +94,7 @@ The Tools screen lists **39 tools** in five groups. Step-by-step manuals are in 
 | **BLE Scanner** | Devices, GATT explorer, and JSON dumps |
 | **Bluetooth Classic** | Discovery, SDP services, and an SPP serial terminal |
 | **Network Scanner** | Hosts, ports, banners, mDNS, and SSDP on the LAN you are joined to |
-| **Connection Log** | This phone’s apps, hosts, and bytes, plus a PCAP. A local VPN forwards IPv4. IPv6 stays on the normal connection. |
+| **Connection Log** | This phone’s apps, hosts, and bytes, plus a PCAP. The VPN interface only observes and forwards IPv4. It is not a remote VPN. IPv6 stays on the normal connection. |
 | **Proximity Radar** | Nearby devices plotted by estimated distance. Pinch to zoom. |
 | **FTM Ranging** | 802.11mc distance to access points that answer |
 | **Mesh Network Scanner** | Bluetooth companion links and LoRa mesh broadcasts. Hear only. |
@@ -145,7 +152,7 @@ The Tools screen lists **39 tools** in five groups. Step-by-step manuals are in 
 <details>
 <summary><b>Is RadiusRF legal to use?</b></summary>
 
-The app is legal. How you use it is your responsibility. Only scan, probe, or test networks and devices you **own or have written permission** to assess. See the [Disclaimer](#-disclaimer) and the in-app Ethical Use Agreement.
+The app is legal. How you use it is your responsibility. Only inspect networks, radios, and devices you **own or are allowed to look at**. See the [Disclaimer](#-disclaimer) and the in-app Ethical Use Agreement.
 </details>
 
 <details>
@@ -169,13 +176,13 @@ No — tools depend on your hardware (IR blaster, UWB, barometer, etc. aren't on
 <details>
 <summary><b>Does it drain my battery?</b></summary>
 
-No. Nothing scans until you tap start, every scanner auto-stops after a timeout, and all services are lazy-loaded. The home screen costs effectively zero battery. See [Battery Optimization](docs/BATTERY.md).
+Nothing scans until you open a tool and start it. The scan stops when you leave that screen. Some short scans also end on their own. See [Battery Optimization](docs/BATTERY.md).
 </details>
 
 <details>
 <summary><b>Is my data collected?</b></summary>
 
-Everything runs on-device. There's no login and no account. Permissions are requested only when a specific feature needs them.
+There is no login and no account. Surveys, logs, and captures stay on the phone. Field Map and wardriving can download map tiles. Floor walk uses Play Services for AR, and the camera frames are not saved. A floor-walk image or a PCAP leaves the phone only when you tap share. The full note is in [PRIVACY.md](PRIVACY.md).
 </details>
 
 ---
@@ -224,7 +231,7 @@ Not all phones have all hardware. The Dashboard shows which capabilities your de
 
 | Layer | Technology |
 |-------|-----------|
-| Language | Kotlin 2.2.0 |
+| Language | Kotlin 2.4.10 |
 | UI Framework | Jetpack Compose (BOM 2026.06.01) |
 | Design System | Material 3 (dark theme, JetBrains Mono, CutCornerShape) |
 | Architecture | MVVM (ViewModel + StateFlow + Compose) |
@@ -232,13 +239,31 @@ Not all phones have all hardware. The Dashboard shows which capabilities your de
 | DI | Hilt 2.60.1 |
 | Database | Room 2.8.4 (6 entities, auto-migration) |
 | Camera | CameraX 1.6.1 |
-| Barcode | ML Kit Barcode 17.3.0 + ZXing 3.5.3 |
+| Barcode | ML Kit Barcode 17.3.0 + ZXing 3.5.4 |
 | Location | Play Services Location 21.4.0 |
 | Ranging | Jetpack Core UWB 1.0.0 |
 | Permissions | Accompanist Permissions |
 | Build | Gradle 9.7.0, AGP 9.3.1 |
 | Min / Target SDK | 26 (Android 8.0) / 36 · compile SDK 37 |
 </details>
+
+---
+
+## Privacy
+
+There is no account. Logs stay on the phone. Map tiles, Play Services for AR, and a share you start yourself are the exceptions. Details: **[PRIVACY.md](PRIVACY.md)**.
+
+---
+
+## Licenses
+
+Source for this app is this repository: [github.com/Undrcrrnt/RadiusRF](https://github.com/Undrcrrnt/RadiusRF).
+
+The receive path for some USB Wi-Fi adapters includes the Jaguar receive core from [devourer](third_party/devourer), which is GPL-2.0. The license text shipped in the app is [LICENSE-devourer.txt](app/src/main/assets/LICENSE-devourer.txt). Transmit examples from that project are not included.
+
+USB access uses libusb, LGPL-2.1, built as its own shared library. See [third_party/libusb/COPYING](third_party/libusb/COPYING).
+
+The Airspy and HydraSDR libraries keep the notices in [third_party/airspy/LICENSE.md](third_party/airspy/LICENSE.md) and [third_party/hydrasdr/LICENSE.md](third_party/hydrasdr/LICENSE.md).
 
 ---
 
@@ -266,9 +291,9 @@ If RadiusRF is useful to you, consider **starring the repo** ⭐ — it helps ot
 
 ## ⚠️ Disclaimer
 
-RadiusRF is provided **for educational purposes, authorized security research, and defensive use only**.
+RadiusRF is a personal awareness app. Use it on networks, radios, and devices you own or are allowed to inspect.
 
-The tools in this app inspect radios, sensors, and networks around you. Using them to access, monitor, disrupt, or attack networks, devices, or people **without explicit authorization is illegal** in most jurisdictions and is **not** the intended use of this software.
+The tools report what the phone or an attached receiver heard. Using them to access, monitor, disrupt, or attack networks, devices, or people **without permission is illegal** in most jurisdictions and is **not** the intended use of this software.
 
 - You are solely responsible for how you use RadiusRF and for complying with all applicable laws.
 - Only scan, probe, or test networks and devices you **own** or have **written permission** to assess.
