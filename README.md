@@ -307,7 +307,7 @@ The tools report what the phone or an attached receiver heard. Using them to acc
 
 By building, installing, or using RadiusRF, you agree to these terms and to the in-app Ethical Use Agreement.
 
-<p align="center">
-  <sub>Built with ☕ and Kotlin · If you find RadiusRF useful, drop a ⭐</sub>
+
+  
 </p>
  
