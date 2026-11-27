@@ -70,8 +70,6 @@ A row in this app is a report from the phone or from an attached receiver. It is
 
 ## 🧰 Features
 
-Every tool solves a specific, real problem. Full step-by-step docs live in the **[📖 Complete Tool Guide →](docs/TOOLS.md)**.
-
 The Tools screen lists **39 tools** in five groups. Step-by-step manuals are in the **[Complete Tool Guide](docs/TOOLS.md)**.
 
 <details open>
